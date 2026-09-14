@@ -1,0 +1,11 @@
+# 运行时数据（SQLite 数据库与 WAL 文件）
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# 构建产物
+/bin/
+
+# 本地配置
+.env
