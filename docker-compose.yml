@@ -1,0 +1,80 @@
+# 后端容器化部署。最短路径：
+#   cp .env.example .env && 填好 AUTH_SECRET / WECHAT_*
+#   sudo make docker-init          # 建 data/ backup/ 并 chown 给容器里的 uid 10001
+#   docker compose up -d --build
+#
+# 需要容器里的 Caddy 顺手把 HTTPS 和买家查单页也办了（详见 deploy/DOCKER.md）：
+#   docker compose --profile proxy up -d --build
+name: crab-order
+
+services:
+  api:
+    build:
+      context: .
+      args:
+        # 国内机器可在 .env 里写 GOPROXY=https://goproxy.cn,direct
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    image: crab-order:latest
+    container_name: crab-api
+    restart: unless-stopped
+
+    # 业务配置从 .env 读：AUTH_SECRET / WECHAT_APPID / WECHAT_SECRET / ADMIN_OPENIDS ...
+    env_file:
+      - .env
+
+    # 这两个必须用容器里的值，覆盖 .env 中面向裸机部署的写法：
+    # 监听 0.0.0.0 才能被端口映射和 caddy 访问到；数据库必须落在挂载卷里，
+    # 否则容器一重建（升级）数据就没了。
+    environment:
+      HTTP_ADDR: ":8080"
+      DB_PATH: /data/crab.db
+
+    volumes:
+      - ./data:/data        # SQLite 数据库与 WAL 文件
+      - ./backup:/backup    # scripts/backup.sh 的热备份落点
+
+    # 只绑回环地址：宿主机上的 Caddy / Nginx 能反代到，公网直连不到。
+    # 用下面 proxy profile 的容器化 Caddy 时这段留着也无妨（它走 compose 内网）。
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    # 服务收到 SIGTERM 后给在途请求 10 秒排空，宽限期要比它长
+    stop_grace_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # 可选的反代：自动申请并续期 HTTPS 证书，同时托管买家查单页 /t。
+  # 默认不启动（profiles），宿主机上已经有 Nginx / Caddy 的话不用它。
+  #   docker compose --profile proxy up -d
+  caddy:
+    image: caddy:2-alpine
+    container_name: crab-caddy
+    restart: unless-stopped
+    profiles: ["proxy"]
+    depends_on:
+      - api
+    ports:
+      - "80:80"      # ACME HTTP-01 验证与 HTTP→HTTPS 跳转要用
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # 必填，且域名要已经解析到这台机器，否则签不出证书
+      CRAB_DOMAIN: ${CRAB_DOMAIN:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web/track:/srv/track:ro   # 买家查单页，静态文件
+      - caddy-data:/data            # 证书，删了要重新签，注意 ACME 频率限制
+      - caddy-config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy-data:
+  caddy-config:

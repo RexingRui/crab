@@ -1,0 +1,36 @@
+# 构建上下文只需要 go.mod / go.sum / cmd / internal / scripts，
+# 其余一律排除：上下文越小，docker build 越快。
+
+.git
+.gitignore
+.github
+
+# 前端不进后端镜像（买家查单页由反代挂载，见 docker-compose.yml）
+miniprogram/
+web/
+node_modules/
+dist/
+.temp/
+.swc/
+
+# 运行时数据与备份
+data/
+backup/
+*.db
+*.db-wal
+*.db-shm
+
+# 构建产物
+bin/
+coverage.out
+
+# 本地配置与文档
+.env
+*.log
+README.md
+log.md
+LICENSE
+Dockerfile
+.dockerignore
+docker-compose.yml
+deploy/
