@@ -4,6 +4,7 @@ export default defineAppConfig({
     'pages/record/index',
     'pages/orders/index',
     'pages/detail/index',
+    'pages/edit/index',
     'pages/settings/index'
   ],
   window: {

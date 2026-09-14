@@ -139,13 +139,20 @@ button:disabled{opacity:.45}
     return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + p(d.getHours()) + ':' + p(d.getMinutes())
   }
 
+  function fmtDay(v) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ''))
+    return m ? (+m[2]) + '月' + (+m[3]) + '日' : String(v || '')
+  }
+
   function node(on, title, detail, extra) {
     return '<div class="node' + (on ? ' on' : '') + '">' +
       '<div class="t">' + esc(title) + (extra || '') + '</div>' +
-      (detail ? '<div class="d">' + esc(detail) + '</div>' : '') + '</div>'
+      (detail ? '<div class="d">' + detail + '</div>' : '') + '</div>'
   }
 
   function render(o) {
+    // 字段与后端 PublicOrderDTO 对齐：脱敏后只有这些，没有金额、备注，
+    // 也没有下单时间和收货时间，所以时间轴上那两个节点不带时刻。
     var shipped = o.ship_status === 'shipped' || o.ship_status === 'received'
     var received = o.ship_status === 'received'
     var track = ''
@@ -153,17 +160,23 @@ button:disabled{opacity:.45}
       track = '<button class="copy" type="button" data-copy="' + esc(o.tracking_no) + '">复制</button>'
     }
 
+    var shipDetail = ''
+    if (shipped) {
+      shipDetail = esc(((o.ship_company || '') + ' ' + (o.tracking_no || '')).trim())
+      if (o.ship_time) shipDetail += (shipDetail ? '　' : '') + esc(fmt(o.ship_time))
+    } else if (o.expect_ship_date) {
+      shipDetail = '约定 ' + esc(fmtDay(o.expect_ship_date)) + ' 发出'
+    }
+
     var html =
       '<div class="no">' + esc(o.order_no) + '</div>' +
-      '<div class="who">' + esc(o.receiver_name) + '　' + esc(o.receiver_phone) + '</div>' +
-      '<div class="addr">' + esc(o.receiver_address) + '</div>' +
+      '<div class="who">' + esc(o.receiver_name) + '　' + esc(o.phone) + '</div>' +
+      '<div class="addr">' + esc(o.address) + '</div>' +
       (o.items_summary ? '<div class="items">' + esc(o.items_summary) + '</div>' : '') +
       '<div class="line">' +
-        node(received, '已收货', received ? fmt(o.received_at) : '') +
-        node(shipped, shipped ? '已发货' : '还没发出',
-             shipped ? ((o.ship_company || '') + ' ' + (o.tracking_no || '')).trim() + (o.shipped_at ? '　' + fmt(o.shipped_at) : '') : '',
-             track) +
-        node(true, '已记录', fmt(o.created_at)) +
+        node(received, '已收货', '') +
+        node(shipped, shipped ? '已发货' : '还没发出', shipDetail, track) +
+        node(true, '已记录', '') +
       '</div>'
 
     rEl.innerHTML = html

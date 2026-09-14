@@ -20,6 +20,7 @@ export default function PaymentSheet({ visible, order, submitting, onClose, onSu
 
   useEffect(() => {
     if (!visible) return
+    // 默认带入还差的部分；已经收清或多收了就留空，让人自己填
     const rest = order ? Math.max(0, order.unpaid_amount || 0) : 0
     setAmount(rest ? fenToYuan(rest, { symbol: false, alwaysCents: true }) : '')
     setMethod('wechat')
@@ -37,7 +38,7 @@ export default function PaymentSheet({ visible, order, submitting, onClose, onSu
       footer={
         <View
           className={`btn btn--primary btn--block ${ready && !submitting ? '' : 'btn--off'}`}
-          onClick={ready && !submitting ? () => onSubmit({ amount: fen, method, remark }) : undefined}
+          onClick={ready && !submitting ? () => onSubmit({ amount: fen, pay_method: method, paid_at: null, remark }) : undefined}
         >
           {submitting ? '提交中' : '记下'}
         </View>

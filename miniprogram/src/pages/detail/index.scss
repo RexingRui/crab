@@ -70,6 +70,8 @@
   }
 
   &__rest { color: $boiled; font-size: 28px; font-weight: 600; }
+  // 多收不是要动手的事，用主色而不是告警色
+  &__over { color: $shell; font-size: 28px; font-weight: 600; }
 
   &__ship { padding: 24px; }
   &__tracking { flex: 1; font-size: 28px; }
@@ -88,6 +90,8 @@
   }
 
   &__remark { padding: 24px; }
+  &__remark-label { display: block; margin-bottom: 8px; }
+  &__remark-text { font-size: 28px; line-height: 1.5; }
 
   &__logs-head { padding: 24px; }
   &__logs { padding: 0 24px 24px; }

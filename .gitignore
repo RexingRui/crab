@@ -1,6 +1,20 @@
+# 运行时数据（SQLite 数据库与 WAL 文件）
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# 构建产物
+/bin/
 node_modules/
 dist/
+
+# 前端构建缓存
 .temp/
 .swc/
+
+# 本地配置
+.env
+
 *.log
 .DS_Store

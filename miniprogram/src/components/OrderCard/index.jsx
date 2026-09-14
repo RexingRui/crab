@@ -8,7 +8,7 @@ import './index.scss'
  */
 export default function OrderCard({ order, onClick, onShip, showShipButton }) {
   if (!order) return null
-  const overdue = overdueDays(order.plan_ship_date, order.ship_status)
+  const overdue = overdueDays(order.expect_ship_date, order.ship_status)
   const tone = overdue > 0 ? 'boiled' : order.ship_status === 'pending' ? 'claw' : 'none'
 
   return (
@@ -44,7 +44,7 @@ export default function OrderCard({ order, onClick, onShip, showShipButton }) {
             发货
           </Text>
         ) : (
-          <Text className='order-card__money money'>{fenToYuan(order.total_amount)}</Text>
+          <Text className='order-card__money money'>{fenToYuan(order.payable_amount)}</Text>
         )}
       </View>
     </View>

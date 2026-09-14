@@ -40,7 +40,7 @@ export default function Detail() {
     )
   }
 
-  const overdue = overdueDays(order.plan_ship_date, order.ship_status)
+  const overdue = overdueDays(order.expect_ship_date, order.ship_status)
 
   /* 状态变更后让标签闪一下，是这一页唯一的动效 */
   async function afterChange(msg) {
@@ -98,17 +98,36 @@ export default function Detail() {
   async function more() {
     const actions = []
     if (order.ship_status === 'shipped') actions.push('回退到待发货')
+    if (order.ship_status === 'received') actions.push('回退到已发货')
+    if (order.ship_status === 'pending' || order.ship_status === 'shipped') actions.push('取消这一单')
     actions.push('删除这一单')
     const { tapIndex } = await Taro.showActionSheet({ itemList: actions }).catch(() => ({ tapIndex: -1 }))
     if (tapIndex < 0) return
     const picked = actions[tapIndex]
     if (guardDemo(toast)) return
 
-    if (picked === '回退到待发货') {
-      const { confirm } = await Taro.showModal({ title: '回退发货状态？', content: '运单号会被清掉' })
+    if (picked === '回退到待发货' || picked === '回退到已发货') {
+      const to = picked === '回退到待发货' ? 'pending' : 'shipped'
+      const { confirm } = await Taro.showModal({
+        title: '回退状态？',
+        content: to === 'pending' ? '运单号会被清掉' : '退回到已发货'
+      })
       if (!confirm) return
-      await api.revertShip(order.id)
+      // 后端要求带上回退目标和原因
+      await api.revertShip(order.id, to, '点错了')
       await afterChange('回退了')
+      return
+    }
+
+    if (picked === '取消这一单') {
+      const { confirm, content } = await Taro.showModal({
+        title: '取消这一单？',
+        editable: true,
+        placeholderText: '写个原因，比如：客户改期'
+      })
+      if (!confirm) return
+      await api.cancelOrder(order.id, String(content || '').trim() || '卖家取消')
+      await afterChange('取消了')
       return
     }
 
@@ -133,7 +152,7 @@ export default function Detail() {
           <View className='detail__head-actions'>
             <Text
               className='detail__link'
-              onClick={() => Taro.navigateTo({ url: `/pages/record/index?id=${order.id}` })}
+              onClick={() => Taro.navigateTo({ url: `/pages/edit/index?id=${order.id}` })}
             >
               编辑
             </Text>
@@ -156,31 +175,31 @@ export default function Detail() {
       <View className='section card'>
         <View className='detail__line'>
           <Text className='detail__name'>{order.receiver_name}</Text>
-          <Text className='detail__phone num'>{maskPhone(order.receiver_phone)}</Text>
+          <Text className='detail__phone num'>{maskPhone(order.phone)}</Text>
           <Text
             className='detail__link'
-            onClick={() => Taro.makePhoneCall({ phoneNumber: order.receiver_phone })}
+            onClick={() => Taro.makePhoneCall({ phoneNumber: order.phone })}
           >
             拨打
           </Text>
         </View>
         <View className='detail__line detail__line--top'>
-          <Text className='detail__address'>{order.receiver_address}</Text>
+          <Text className='detail__address'>{order.address}</Text>
           <Text className='detail__link' onClick={() => copy(
-            `${order.receiver_name} ${order.receiver_phone} ${order.receiver_address}`, '地址复制好了'
+            `${order.receiver_name} ${order.phone} ${order.address}`, '地址复制好了'
           )}>复制</Text>
         </View>
-        {order.wechat_note ? (
+        {order.wechat_remark ? (
           <View className='detail__line'>
-            <Text className='sub'>微信备注：{order.wechat_note}</Text>
+            <Text className='sub'>微信备注：{order.wechat_remark}</Text>
           </View>
         ) : null}
       </View>
 
       <View className='section card detail__items'>
         {(order.items || []).map((it, i) => (
-          <View className='detail__item' key={`${it.spec_id}-${i}`}>
-            <Text className='detail__item-name'>{it.gender_text} {it.size}</Text>
+          <View className='detail__item' key={`${it.spec_label}-${i}`}>
+            <Text className='detail__item-name'>{it.gender_text} {it.spec_label}</Text>
             <Text className='detail__item-qty num'>×{it.quantity}</Text>
             <Text className='detail__item-price num'>{fenToYuan(it.unit_price)}</Text>
             <Text className='detail__item-amount num'>{fenToYuan(it.amount)}</Text>
@@ -194,12 +213,15 @@ export default function Detail() {
           {order.discount ? <SumLine label='优惠' value={`−${fenToYuan(order.discount)}`} /> : null}
           <View className='detail__total'>
             <Text className='group-title'>应收</Text>
-            <Text className='money-lg'>{fenToYuan(order.total_amount)}</Text>
+            <Text className='money-lg'>{fenToYuan(order.payable_amount)}</Text>
           </View>
           <View className='detail__paid'>
             <Text className='sub'>已收 {fenToYuan(order.paid_amount)}</Text>
             {order.unpaid_amount > 0 ? (
               <Text className='detail__rest num'>还差 {fenToYuan(order.unpaid_amount)}</Text>
+            ) : order.unpaid_amount < 0 ? (
+              // 后端允许超付，多出来的部分要说清楚，不能显示成「还差 -50」
+              <Text className='detail__over num'>多收 {fenToYuan(-order.unpaid_amount)}</Text>
             ) : (
               <Text className='sub'>已收清</Text>
             )}
@@ -215,7 +237,7 @@ export default function Detail() {
             <Text className='detail__tracking num'>{order.tracking_no}</Text>
             <Text className='detail__link' onClick={() => copy(order.tracking_no, '运单号复制好了')}>复制</Text>
           </View>
-          {order.shipped_at ? <Text className='sub'>{formatDate(order.shipped_at, 'M月D日 HH:mm')} 发出</Text> : null}
+          {order.ship_time ? <Text className='sub'>{formatDate(order.ship_time, 'M月D日 HH:mm')} 发出</Text> : null}
         </View>
       ) : null}
 
@@ -226,7 +248,7 @@ export default function Detail() {
             <View className='detail__pay' key={p.id}>
               <Text className='sub num'>{formatDate(p.paid_at, 'M/D HH:mm')}</Text>
               <Text className='detail__pay-amount num'>{fenToYuan(p.amount)}</Text>
-              <Text className='sub'>{p.method_text || p.method}</Text>
+              <Text className='sub'>{p.pay_method_text || p.pay_method}</Text>
               <Text className='sub'>{p.remark}</Text>
             </View>
           ))}
@@ -235,8 +257,8 @@ export default function Detail() {
 
       {order.remark ? (
         <View className='section card detail__remark'>
-          <Text className='sub'>备注</Text>
-          <Text>{order.remark}</Text>
+          <Text className='sub detail__remark-label'>备注</Text>
+          <Text className='detail__remark-text'>{order.remark}</Text>
         </View>
       ) : null}
 

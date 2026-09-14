@@ -7,6 +7,9 @@ import './index.scss'
 /**
  * 半屏规格选择器。单价默认带出价目表的价，但必须可改——
  * 熟客让价、大客户批发价是常态，不要因为有价目表就设成只读。
+ *
+ * 注意：后端的订单明细是**快照**，不关联 specs 表（改价不影响历史单），
+ * 所以这里要把整条规格带过去，不能只传 spec_id。
  */
 export default function SpecPicker({ visible, specs = [], onClose, onConfirm }) {
   const [gender, setGender] = useState('male')
@@ -47,11 +50,12 @@ export default function SpecPicker({ visible, specs = [], onClose, onConfirm }) 
   function confirm() {
     if (!current) return
     onConfirm({
-      spec_id: current.id,
       gender: current.gender,
       gender_text: current.gender_text,
-      size: current.size,
-      spec_name: current.name || `${current.gender_text} ${current.size}`,
+      spec_gram: current.spec_gram,
+      spec_label: current.spec_label,
+      unit: current.unit,
+      unit_text: current.unit_text,
       unit_price: unitPrice,
       quantity,
       amount
@@ -91,7 +95,7 @@ export default function SpecPicker({ visible, specs = [], onClose, onConfirm }) 
             className={`spec-picker__cell ${specId === spec.id ? 'spec-picker__cell--on' : ''}`}
             onClick={() => pick(spec)}
           >
-            <Text className='spec-picker__size'>{spec.size}</Text>
+            <Text className='spec-picker__size'>{spec.spec_label}</Text>
             <Text className='spec-picker__price num'>{fenToYuan(spec.unit_price)}</Text>
           </View>
         ))}

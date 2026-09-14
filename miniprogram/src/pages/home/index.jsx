@@ -29,7 +29,7 @@ export default function Home() {
     await whenReady()
     const [d, p, r] = await Promise.all([
       api.dashboard().catch(() => null),
-      api.shipPlan('today').catch(() => null),
+      api.shipPlan().catch(() => null),
       api.orders({ page: 1, page_size: 10 }).catch(() => null)
     ])
     if (d) setDash(d)
@@ -64,6 +64,8 @@ export default function Home() {
   }
 
   const today = new Date()
+  // dashboard 是 { today, pending, range } 三段式
+  const pending = (dash && dash.pending) || {}
   const shown = plan.slice(0, PLAN_LIMIT)
   const restCount = Math.max(0, plan.length - PLAN_LIMIT)
 
@@ -129,15 +131,15 @@ export default function Home() {
         <View className='home__stat' onClick={() => goList({ pay_status: 'unpaid' })}>
           <Text className='home__stat-label'>还没收到钱</Text>
           <Text className='home__stat-value money'>
-            {fenToYuan((dash && dash.unpaid_amount) || 0)}
-            <Text className='sub'> · {(dash && dash.unpaid_count) || 0} 笔</Text>
+            {fenToYuan(pending.unpaid_amount || 0)}
+            <Text className='sub'> · {pending.unpaid_order_count || 0} 笔</Text>
           </Text>
           <Text className='home__stat-arrow'>›</Text>
         </View>
         <View className='divider' />
         <View className='home__stat' onClick={() => goList({ ship_status: 'shipped' })}>
           <Text className='home__stat-label'>发了还没签收</Text>
-          <Text className='home__stat-value num'>{(dash && dash.shipped_count) || 0} 单</Text>
+          <Text className='home__stat-value num'>{pending.shipped_not_received_count || 0} 单</Text>
           <Text className='home__stat-arrow'>›</Text>
         </View>
       </View>
@@ -159,7 +161,7 @@ export default function Home() {
               >
                 <Text className='home__recent-day sub'>{friendlyDay(order.created_at)}</Text>
                 <Text className='home__recent-name'>{order.receiver_name}</Text>
-                <Text className='home__recent-money money'>{fenToYuan(order.total_amount)}</Text>
+                <Text className='home__recent-money money'>{fenToYuan(order.payable_amount)}</Text>
                 <View className='home__recent-tags'>
                   <StatusTag kind='ship' value={order.ship_status} text={order.ship_status_text} />
                   <StatusTag

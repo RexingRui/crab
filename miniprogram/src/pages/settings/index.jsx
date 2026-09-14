@@ -13,7 +13,10 @@ import { guardDemo, useDemoMode } from '../../hooks/useDemoMode'
 import { toast, login } from '../../utils/request'
 import './index.scss'
 
-const EMPTY_SPEC = { id: null, gender: 'male', size: '', unit: '只', unit_price: '', enabled: true, sort: 0 }
+const EMPTY_SPEC = {
+  id: null, gender: 'male', spec_gram: '', spec_label: '',
+  unit: 'piece', unit_price: '', enabled: true, sort_no: 0
+}
 
 export default function Settings() {
   const demo = useDemoMode()
@@ -25,7 +28,7 @@ export default function Settings() {
   const load = useCallback(async () => {
     await whenReady()
     try {
-      const res = await api.specs()
+      const res = await api.allSpecs()
       setSpecs((res && res.list) || [])
     } catch (e) { /* 已统一提示 */ }
   }, [])
@@ -41,14 +44,17 @@ export default function Settings() {
 
   async function saveSpec() {
     if (guardDemo(toast)) return
-    if (!editing.size.trim()) { toast('填一下规格，比如 4.5两'); return }
+    if (!String(editing.spec_label).trim()) { toast('填一下规格，比如 4.5两'); return }
+    const gram = Number(editing.spec_gram)
+    if (!gram || gram <= 0) { toast('填一下克重，4.5两就是 225'); return }
     const body = {
       gender: editing.gender,
-      size: editing.size.trim(),
-      unit: editing.unit || '只',
+      spec_gram: gram,
+      spec_label: String(editing.spec_label).trim(),
+      unit: editing.unit || 'piece',
       unit_price: yuanToFen(editing.unit_price),
-      enabled: editing.enabled,
-      sort: Number(editing.sort) || 0
+      enabled: editing.enabled !== false,
+      sort_no: Number(editing.sort_no) || 0
     }
     if (editing.id) await api.updateSpec(editing.id, body)
     else await api.createSpec(body)
@@ -57,15 +63,16 @@ export default function Settings() {
     load()
   }
 
-  async function removeSpec(spec) {
+  async function disableSpec(spec) {
     if (guardDemo(toast)) return
     const { confirm } = await Taro.showModal({
-      title: '删掉这一档？',
-      content: '已经记过的单不受影响',
+      title: '停用这一档？',
+      content: '以后记单时不再出现，已经记过的单不受影响',
       confirmColor: '#D2542A'
     })
     if (!confirm) return
-    await api.removeSpec(spec.id)
+    // 后端是软停用，不物理删
+    await api.disableSpec(spec.id)
     load()
   }
 
@@ -112,11 +119,13 @@ export default function Settings() {
         <View className='card'>
           {specs.map((spec) => (
             <View className='settings__spec' key={spec.id}>
-              <Text className='settings__spec-name'>{spec.gender_text || (spec.gender === 'male' ? '公' : '母')} {spec.size}</Text>
+              <Text className='settings__spec-name'>
+                {spec.gender_text || (spec.gender === 'male' ? '公' : '母')} {spec.spec_label}
+              </Text>
               <Text className='settings__spec-price num'>{fenToYuan(spec.unit_price)}</Text>
               {spec.enabled === false ? <Text className='sub'>停用</Text> : null}
               <Text className='settings__link' onClick={() => editSpec(spec)}>改</Text>
-              <Text className='settings__del' onClick={() => removeSpec(spec)}>删</Text>
+              <Text className='settings__del' onClick={() => disableSpec(spec)}>停用</Text>
             </View>
           ))}
           {specs.length === 0 ? <Text className='settings__blank sub'>还没配规格。</Text> : null}
@@ -192,9 +201,19 @@ export default function Settings() {
               <Text className='field__label'>规格</Text>
               <Input
                 className='field__input'
-                value={editing.size}
+                value={editing.spec_label}
                 placeholder='4.5两'
-                onInput={(e) => setEditing({ ...editing, size: e.detail.value })}
+                onInput={(e) => setEditing({ ...editing, spec_label: e.detail.value })}
+              />
+            </View>
+            <View className='field'>
+              <Text className='field__label'>克重</Text>
+              <Input
+                className='field__input num'
+                type='number'
+                value={String(editing.spec_gram)}
+                placeholder='4.5两就是 225'
+                onInput={(e) => setEditing({ ...editing, spec_gram: e.detail.value })}
               />
             </View>
             <View className='field'>
@@ -212,8 +231,8 @@ export default function Settings() {
               <Input
                 className='field__input num'
                 type='number'
-                value={String(editing.sort)}
-                onInput={(e) => setEditing({ ...editing, sort: e.detail.value })}
+                value={String(editing.sort_no)}
+                onInput={(e) => setEditing({ ...editing, sort_no: e.detail.value })}
               />
             </View>
             <View className='field'>
