@@ -1,0 +1,92 @@
+@use '../../styles-tokens.scss' as *;
+
+.spec-picker {
+  &__segment {
+    display: flex;
+    background: rgba(107, 118, 112, 0.08);
+    border-radius: $radius-btn;
+    padding: 4px;
+    margin-bottom: 24px;
+  }
+
+  &__seg {
+    flex: 1;
+    text-align: center;
+    padding: 14px 0;
+    font-size: 28px;
+    color: $muted;
+    border-radius: 10px;
+
+    &--on {
+      background: $card;
+      color: $shell;
+      font-weight: 600;
+    }
+  }
+
+  &__grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  &__cell {
+    width: calc(25% - 12px);
+    border: 1px solid $line;
+    border-radius: $radius-btn;
+    padding: 16px 8px;
+    text-align: center;
+
+    &--on {
+      border-color: $shell;
+      background: rgba(47, 71, 57, 0.06);
+    }
+  }
+
+  &__size { display: block; font-size: 26px; }
+  &__price { display: block; font-size: 24px; color: $muted; margin-top: 6px; }
+
+  &__line {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 32px;
+  }
+
+  &__label { width: 100px; color: $muted; font-size: 28px; }
+
+  &__stepper {
+    display: flex;
+    align-items: center;
+    border: 1px solid $line;
+    border-radius: $radius-btn;
+    overflow: hidden;
+  }
+
+  &__step {
+    width: 72px;
+    text-align: center;
+    font-size: 34px;
+    line-height: 64px;
+    color: $shell;
+  }
+
+  &__count {
+    width: 96px;
+    text-align: center;
+    font-size: 30px;
+    border-left: 1px solid $line;
+    border-right: 1px solid $line;
+    line-height: 64px;
+  }
+
+  &__input {
+    flex: 1;
+    border: 1px solid $line;
+    border-radius: $radius-btn;
+    padding: 14px 20px;
+    font-size: 30px;
+  }
+}
+
+.btn--off { opacity: 0.45; }

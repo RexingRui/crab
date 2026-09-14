@@ -1,0 +1,68 @@
+@use '../../styles-tokens.scss' as *;
+
+.order-card {
+  position: relative;
+  @include card;
+  padding: 24px;
+  margin-bottom: 16px;
+  overflow: hidden;
+
+  // 左侧竖条：金色是今天要动手的，熟蟹红是已经超期的
+  &--bar-claw::before,
+  &--bar-boiled::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 6px;
+  }
+  &--bar-claw::before { background: $claw; }
+  &--bar-boiled::before { background: $boiled; }
+
+  &__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  &__name { font-size: 30px; font-weight: 600; }
+
+  &__tags {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  &__overdue {
+    font-size: 22px;
+    color: $boiled;
+    font-weight: 600;
+  }
+
+  &__summary {
+    display: block;
+    margin-top: 10px;
+    font-size: 26px;
+    color: $muted;
+  }
+
+  &__bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 16px;
+  }
+
+  &__no { font-size: 24px; color: $muted; }
+  &__money { font-size: 30px; font-weight: 600; }
+
+  &__ship {
+    background: $shell;
+    color: #fff;
+    font-size: 26px;
+    padding: 10px 28px;
+    border-radius: $radius-btn;
+  }
+}

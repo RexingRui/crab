@@ -1,0 +1,106 @@
+@use '../../styles-tokens.scss' as *;
+
+.detail {
+  &__loading { display: block; padding: 80px; text-align: center; }
+
+  &__head { padding: 24px; }
+  &__no { font-size: 32px; font-weight: 600; }
+
+  &__head-actions { display: flex; gap: 28px; }
+
+  &__link { font-size: 26px; color: $shell; }
+
+  &__tags {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  &__overdue { font-size: 22px; color: $boiled; font-weight: 600; }
+
+  &__line {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 24px;
+    border-bottom: 1px solid $line;
+
+    &:last-child { border-bottom: none; }
+    &--top { align-items: flex-start; }
+  }
+
+  &__name { font-size: 30px; font-weight: 600; }
+  &__phone { flex: 1; color: $muted; font-size: 28px; }
+  &__address { flex: 1; font-size: 28px; line-height: 1.5; }
+
+  &__items { padding: 8px 0; }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    padding: 16px 24px;
+    font-size: 28px;
+  }
+
+  &__item-name { flex: 1; }
+  &__item-qty { width: 90px; color: $muted; }
+  &__item-price { width: 120px; text-align: right; color: $muted; }
+  &__item-amount { width: 140px; text-align: right; font-weight: 600; }
+
+  &__sum { padding: 20px 24px; }
+
+  &__sum-line {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+  }
+
+  &__total {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-top: 12px;
+  }
+
+  &__paid {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 12px;
+  }
+
+  &__rest { color: $boiled; font-size: 28px; font-weight: 600; }
+  // 多收不是要动手的事，用主色而不是告警色
+  &__over { color: $shell; font-size: 28px; font-weight: 600; }
+
+  &__ship { padding: 24px; }
+  &__tracking { flex: 1; font-size: 28px; }
+
+  &__block-title { display: block; padding: 24px 24px 8px; }
+
+  &__pay {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 16px 24px;
+    border-bottom: 1px solid $line;
+
+    &:last-child { border-bottom: none; }
+    &-amount { font-size: 28px; font-weight: 600; }
+  }
+
+  &__remark { padding: 24px; }
+  &__remark-label { display: block; margin-bottom: 8px; }
+  &__remark-text { font-size: 28px; line-height: 1.5; }
+
+  &__logs-head { padding: 24px; }
+  &__logs { padding: 0 24px 24px; }
+
+  &__log {
+    display: flex;
+    gap: 20px;
+    padding: 8px 0;
+  }
+
+  &__log-text { font-size: 26px; }
+}

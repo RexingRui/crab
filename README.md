@@ -1,6 +1,14 @@
-# 大闸蟹订单管理 — 后端
+# 大闸蟹订单管理
 
-个人大闸蟹卖家的订单管理后端：卖家在微信小程序里录单、查单、标记发货与收款，买家用免登录链接自助查物流。
+个人大闸蟹卖家的订单管理：卖家在微信小程序里录单、查单、标记发货与收款，买家用免登录链接自助查物流。
+
+| 目录 | 是什么 |
+|---|---|
+| `cmd/` `internal/` | 后端，Go + SQLite，单文件二进制 |
+| `miniprogram/` | 小程序「蟹记」，Taro 4 + React |
+| `web/track/` | 买家查单页，单个静态 HTML |
+
+后端：
 
 - Go 1.22+ / 标准库 `net/http`（Go 1.22 增强版 `ServeMux`）
 - SQLite（`modernc.org/sqlite`，纯 Go 无 CGO），`go.mod` 里只有这一个第三方依赖
@@ -270,6 +278,70 @@ curl 'localhost:8080/api/public/orders?order_no=20260914-007&phone_tail=8000'
 
 强制「单号 + 手机号后 4 位」双因子匹配，任一不对都统一返回 `40400`（不区分「单号不存在」和「手机号不对」，避免被枚举）。返回数据脱敏：姓名只留姓、手机中间 4 位打码、地址只到区县级、不含金额与备注。按 IP 限流每分钟 20 次。
 
+## 前端
+
+### 小程序「蟹记」（`miniprogram/`）
+
+```bash
+cd miniprogram
+npm install
+npm run dev:weapp        # 或 npm run build:weapp
+npm test                 # 地址解析与金额换算的单测
+```
+
+编译完用微信开发者工具打开 `miniprogram/` 目录。接口域名在 `src/utils/config.js` 里改，
+也可以在小程序「设置」页临时改，存本地；小程序后台记得配 request 合法域名。
+
+页面：今天（要发的清单 + 汇总）、记一笔（录单）、全部（列表筛选）、详情、设置。
+
+几条界面上的规矩：
+
+- 主色**蟹壳青** `#2F4739`，待办用**金爪**金 `#C8A227`，逾期和危险操作才用**熟蟹红** `#D2542A`。
+- **已完成的状态一律用灰**，这是整套界面唯一的信息层级。取消掉的单连收款状态也一并淡化——
+  没有要追的钱，就不该用告警色喊人。
+- 金额、数量、单号一律 `tabular-nums` 且右对齐：几十行金额要能竖着对齐扫读。
+- 动效只在状态变更时出现，并且尊重 `prefers-reduced-motion`。
+
+金额在前端也一律是「分」的整数，分转元走整数运算。录单页显示的「应收」只是预估，
+**以后端返回的 `payable_amount` 为准**。
+
+小程序是个人主体 + 笔记类目，所以全站不出现下单、购买、购物车、支付这类电商词汇，
+**变量名和注释也不行**（审核会看包体）；没有 `web-view`，买家链接只能复制文本。
+
+#### 接口对接上几个不显然的地方
+
+后端契约以上面的 API 章节为准，前端字段名一律跟它保持一致，不另造一套。几个踩过的点：
+
+- **`/api/stats/ship-plan?date=` 必须传 `YYYY-MM-DD`**，传 `today` 这种字面量会 400；
+  而且不传时后端默认给的是**明天**，首页要今天就得显式传当天。
+- **订单明细是快照**，建单时要把 `gender / spec_gram / spec_label / unit / quantity / unit_price`
+  整条带过去，后端不认 `spec_id`。改价不影响历史订单就是靠这个。
+- **允许超付**：`unpaid_amount` 会是负数，详情页显示「多收 ¥X」并且用主色，不是告警色。
+- **`DELETE /api/specs/{id}` 是停用**，不是物理删；设置页要 `?all=1` 才看得到停用的档。
+- **回退发货**要带 `{to, reason}`，`to` 只能是 `pending` / `shipped`。
+- 列表筛选的时间参数是 `created_start` / `created_end` 与 `expect_ship_date[_start|_end]`；
+  后端会忽略不认识的参数，写错了不会报错，只会**静默不生效**。
+- 建单幂等命中时返回的是 `code: 0` + `idempotent: true` 和已存在的那笔单，不是错误码，
+  重试逻辑照常走成功分支即可。
+
+#### 审核演示模式
+
+审核员的 openid 不在 `ADMIN_OPENIDS` 里，`/api/login` 会返回 `40300`，直接提审只会看到
+一片空白。所以小程序收到 `40300` 时自动进入**只读演示模式**：用 `src/static/demo.json`
+的本地假数据渲染页面，顶部挂一条提示，写操作一律拒绝。`demo.json` 存的是**相对天数**，
+不管哪天提审，「今天要发的」都还是今天。
+
+> 注意：`ADMIN_OPENIDS` 为空时后端是**引导模式**，不校验白名单也就不会返回 `40300`，
+> 演示模式不会触发。提审前务必先把自己的 openid 填进配置。
+
+### 买家查单页（`web/track/index.html`）
+
+单个静态 HTML，9.6KB，无构建步骤、无框架、无 CDN、无埋点。链接带 `?no=` 时自动填好
+订单号并锁住，买家只需要填手机后四位。只显示物流时间轴，不显示任何金额和备注。
+
+发给买家的链接形如 `https://<域名>/t?no=20260914-007`，小程序详情页的「发链接给买家」
+会把这段话复制到剪贴板。
+
 ## 部署
 
 ```bash
@@ -283,6 +355,21 @@ sudo systemctl daemon-reload && sudo systemctl enable --now crab-order
 ```
 
 - **HTTPS**：微信小程序强制要求 HTTPS 且域名需在小程序后台配置。生产由 Caddy 或 Nginx 反代并自动签证书，Go 服务只监听 `127.0.0.1:8080`（把 `HTTP_ADDR` 设成 `127.0.0.1:8080`）。
+- **买家查单页**：后端不托管静态文件，由反代把 `/t` 指到 `web/track/index.html`，
+  `/api` 反代到 Go。同源，不涉及 CORS。顺手给 `/t` 加一条 `X-Robots-Tag: noindex`。
+  Caddy 大致长这样：
+
+  ```caddy
+  你的域名 {
+      handle /api/* { reverse_proxy 127.0.0.1:8080 }
+      handle /t* {
+          header X-Robots-Tag noindex
+          rewrite * /index.html
+          file_server { root /opt/crab-order/web/track }
+      }
+  }
+  ```
+- **小程序**：微信开发者工具里上传代码、提交审核，与服务端部署无关。
 - **备份**：`scripts/backup.sh` 用 `sqlite3 .backup` 做热备（WAL 模式下**不要直接 cp**，可能拷到不一致的状态），保留最近 30 天。建议 crontab 每天凌晨跑一次：
 
   ```cron

@@ -1,0 +1,27 @@
+@use '../../styles-tokens.scss' as *;
+
+.status-tag {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: $radius-tag;
+  font-size: 22px;
+  line-height: 1.6;
+  white-space: nowrap;
+
+  &--claw { background: rgba(200, 162, 39, 0.14); color: #A68620; }
+  &--shell { background: rgba(47, 71, 57, 0.1); color: $shell; }
+  &--roe { background: rgba(232, 180, 74, 0.18); color: #AC7B16; }
+  &--boiled { background: rgba(210, 84, 42, 0.12); color: $boiled; }
+  &--muted { background: rgba(107, 118, 112, 0.1); color: $muted; }
+
+  &--flash { animation: tagFlash 0.6s ease-out; }
+}
+
+@keyframes tagFlash {
+  0% { background: rgba(232, 180, 74, 0.6); }
+  100% { background: inherit; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-tag--flash { animation: none; }
+}

@@ -1,0 +1,33 @@
+/* 色板取自「青背白肚金爪黄毛」：
+ * 蟹壳青做主色，金爪留给待办，熟蟹红只在逾期和危险操作时出现。 */
+$shell:      #2F4739; // 蟹壳青 — 主色、导航、主按钮
+$shell-deep: #1C231E; // 墨 — 主文字
+$claw:       #C8A227; // 金爪 — 待办 / 未收款 / 强调
+$roe:        #E8B44A; // 蟹黄 — 部分付款
+$boiled:     #D2542A; // 熟蟹红 — 逾期 / 危险操作
+$belly:      #EFF2EE; // 白肚 — 页面底色（冷白，不是暖米色）
+$card:       #FFFFFF;
+$line:       #DCE2DC;
+$muted:      #6B7670; // 次要文字
+
+$radius-card: 16px;
+$radius-tag: 8px;
+$radius-btn: 12px;
+
+// 等宽数字是功能需求不是装饰：几十行金额要能竖着对齐扫读
+@mixin tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  letter-spacing: 0.02em;
+}
+
+@mixin card {
+  background: $card;
+  border: 1px solid $line;
+  border-radius: $radius-card;
+}
+
+// 浮层才有阴影，列表卡片只用描边
+@mixin float-shadow {
+  box-shadow: 0 -8px 32px rgba(28, 35, 30, 0.16);
+}

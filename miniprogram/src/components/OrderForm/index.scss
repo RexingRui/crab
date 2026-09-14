@@ -1,0 +1,105 @@
+@use '../../styles-tokens.scss' as *;
+
+.clip {
+  @include card;
+  border-color: rgba(200, 162, 39, 0.5);
+  background: rgba(200, 162, 39, 0.08);
+  padding: 24px;
+
+  &__title { font-size: 28px; font-weight: 600; }
+
+  &__text {
+    display: block;
+    margin-top: 12px;
+    font-size: 26px;
+    color: $muted;
+    line-height: 1.6;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 24px;
+    margin-top: 20px;
+  }
+
+  &__ignore { font-size: 26px; color: $muted; padding: 10px 20px; }
+
+  &__fill {
+    font-size: 26px;
+    color: #fff;
+    background: $shell;
+    padding: 12px 32px;
+    border-radius: $radius-btn;
+  }
+}
+
+.record {
+  &__add { font-size: 28px; color: $shell; }
+
+  &__no-item {
+    display: block;
+    padding: 40px 24px;
+    text-align: center;
+    color: $muted;
+    font-size: 26px;
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid $line;
+    font-size: 28px;
+
+    &:last-child { border-bottom: none; }
+  }
+
+  &__item-name { flex: 1; }
+  &__item-qty { width: 90px; color: $muted; }
+  &__item-price { width: 120px; text-align: right; color: $muted; }
+  &__item-amount { width: 140px; text-align: right; font-weight: 600; }
+  &__item-del { width: 70px; text-align: right; color: $boiled; font-size: 26px; }
+
+  &__pair {
+    display: flex;
+    border-bottom: 1px solid $line;
+  }
+
+  &__pair-cell {
+    flex: 1;
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    & + & { border-left: 1px solid $line; }
+  }
+
+  &__pair-input {
+    flex: 1;
+    font-size: 30px;
+  }
+
+  &__total {
+    flex: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+}
+
+.field__textarea {
+  min-height: 76px;
+  line-height: 1.5;
+  padding: 4px 0;
+  width: 100%;
+}
+
+.field__input--empty { color: $muted; }

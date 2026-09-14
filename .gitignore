@@ -6,6 +6,15 @@
 
 # 构建产物
 /bin/
+node_modules/
+dist/
+
+# 前端构建缓存
+.temp/
+.swc/
 
 # 本地配置
 .env
+
+*.log
+.DS_Store

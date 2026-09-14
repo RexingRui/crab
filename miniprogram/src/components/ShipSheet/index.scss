@@ -1,0 +1,35 @@
+@use '../../styles-tokens.scss' as *;
+
+.ship-sheet {
+  &__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  &__chip {
+    padding: 12px 24px;
+    border: 1px solid $line;
+    border-radius: $radius-tag;
+    font-size: 26px;
+    color: $shell-deep;
+
+    &--on {
+      border-color: $shell;
+      background: rgba(47, 71, 57, 0.06);
+      color: $shell;
+      font-weight: 600;
+    }
+  }
+
+  &__gap { display: block; margin-top: 32px; }
+
+  &__input {
+    margin-top: 16px;
+    border: 1px solid $line;
+    border-radius: $radius-btn;
+    padding: 20px 24px;
+    font-size: 30px;
+  }
+}
