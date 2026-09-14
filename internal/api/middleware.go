@@ -30,10 +30,28 @@ func RequestIDFrom(ctx context.Context) string {
 	return v
 }
 
+// openIDHolder 让 AccessLog 也能拿到 openid。
+//
+// AccessLog 在链上位于 Auth 之外，拿不到 Auth 派生出的新 context，
+// 所以放一个可写的持有者进去，由 Auth 回填。单个请求内是顺序执行的，没有并发写。
+type openIDHolder struct{ value string }
+
 // OpenIDFrom 取出当前登录者的 openid，未登录返回空串。
 func OpenIDFrom(ctx context.Context) string {
-	v, _ := ctx.Value(ctxKeyOpenID).(string)
-	return v
+	h, _ := ctx.Value(ctxKeyOpenID).(*openIDHolder)
+	if h == nil {
+		return ""
+	}
+	return h.value
+}
+
+// withOpenID 回填 openid：已有持有者就直接写，否则派生一个新的 context。
+func withOpenID(ctx context.Context, openID string) context.Context {
+	if h, ok := ctx.Value(ctxKeyOpenID).(*openIDHolder); ok {
+		h.value = openID
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyOpenID, &openIDHolder{value: openID})
 }
 
 // Middleware 是标准的处理器装饰器。
@@ -120,6 +138,11 @@ func AccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w}
+
+		// 先放一个空的持有者，Auth 校验通过后会把 openid 填进来。
+		ctx := context.WithValue(r.Context(), ctxKeyOpenID, &openIDHolder{})
+		r = r.WithContext(ctx)
+
 		next.ServeHTTP(sw, r)
 		if sw.status == 0 {
 			sw.status = http.StatusOK
@@ -129,8 +152,8 @@ func AccessLog(next http.Handler) http.Handler {
 			"path", r.URL.Path,
 			"status", sw.status,
 			"cost_ms", time.Since(start).Milliseconds(),
-			"request_id", RequestIDFrom(r.Context()),
-			"openid", OpenIDFrom(r.Context()),
+			"request_id", RequestIDFrom(ctx),
+			"openid", OpenIDFrom(ctx),
 			"ip", ClientIP(r),
 		)
 	})
@@ -303,8 +326,7 @@ func Auth(v TokenVerifier, admins AdminChecker) Middleware {
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), ctxKeyOpenID, c.OpenID)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			next.ServeHTTP(w, r.WithContext(withOpenID(r.Context(), c.OpenID)))
 		})
 	}
 }
