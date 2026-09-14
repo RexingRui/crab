@@ -1,0 +1,9 @@
+@use '../../styles-tokens.scss' as *;
+
+.empty {
+  padding: 80px 40px;
+  text-align: center;
+
+  &__text { color: $muted; font-size: 28px; }
+  &__action { margin-top: 32px; display: flex; justify-content: center; }
+}

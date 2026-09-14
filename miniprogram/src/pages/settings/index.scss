@@ -1,0 +1,61 @@
+@use '../../styles-tokens.scss' as *;
+
+.settings {
+  &__spec {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 20px 24px;
+    border-bottom: 1px solid $line;
+
+    &-name { flex: 1; font-size: 28px; }
+    &-price { font-size: 28px; font-weight: 600; }
+
+    &-add {
+      padding: 24px;
+      text-align: center;
+      color: $shell;
+      font-size: 28px;
+    }
+  }
+
+  &__link { font-size: 26px; color: $shell; }
+  &__del { font-size: 26px; color: $boiled; }
+
+  &__blank { display: block; padding: 40px; text-align: center; }
+  &__hint { display: block; margin-top: 12px; }
+
+  &__row { display: flex; justify-content: flex-end; margin-top: 16px; }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 28px 24px;
+    border-bottom: 1px solid $line;
+    font-size: 28px;
+
+    &:last-child { border-bottom: none; }
+  }
+
+  &__arrow { color: $muted; font-size: 30px; }
+
+  &__seg {
+    display: flex;
+    background: rgba(107, 118, 112, 0.08);
+    border-radius: $radius-btn;
+    padding: 4px;
+    margin-bottom: 16px;
+
+    &-item {
+      flex: 1;
+      text-align: center;
+      padding: 14px 0;
+      font-size: 28px;
+      color: $muted;
+      border-radius: 10px;
+
+      &--on { background: $card; color: $shell; font-weight: 600; }
+    }
+  }
+}

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>蟹记 · 查一下你的订单</title>
+<style>
+:root{
+  --shell:#2F4739;--shell-deep:#1C231E;--claw:#C8A227;--boiled:#D2542A;
+  --belly:#EFF2EE;--card:#FFF;--line:#DCE2DC;--muted:#6B7670;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--belly);color:var(--shell-deep);
+  font:16px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;padding:0 16px 48px;
+}
+.wrap{max-width:520px;margin:0 auto}
+.brand{text-align:center;padding:48px 0 8px;font-size:20px;font-weight:600;letter-spacing:.08em;color:var(--shell)}
+h1{font-size:17px;font-weight:400;color:var(--muted);text-align:center;margin:0 0 32px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:8px}
+input{
+  font:inherit;color:inherit;background:var(--card);
+  border:1px solid var(--line);border-radius:12px;padding:12px 14px;width:100%;
+  font-variant-numeric:tabular-nums;letter-spacing:.02em;
+}
+input:focus{outline:none;border-color:var(--shell)}
+input:disabled{background:var(--belly);color:var(--muted)}
+.tail{display:flex;gap:10px;margin-bottom:4px}
+.tail input{text-align:center;padding:12px 0;font-size:20px}
+.gap{margin-top:20px}
+button{
+  font:inherit;font-weight:600;color:#fff;background:var(--shell);
+  border:none;border-radius:12px;padding:14px;width:100%;margin-top:24px;
+}
+button:disabled{opacity:.45}
+.err{color:var(--boiled);font-size:14px;margin-top:16px;text-align:center;min-height:20px}
+.result{margin-top:24px;display:none}
+.result.on{display:block}
+.no{font-variant-numeric:tabular-nums;letter-spacing:.02em;font-size:18px;font-weight:600}
+.who{color:var(--muted);font-size:14px;margin-top:6px;font-variant-numeric:tabular-nums}
+.addr{color:var(--muted);font-size:14px;margin-top:2px}
+.items{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);font-size:15px}
+.line{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.node{position:relative;padding:0 0 22px 24px}
+.node:last-child{padding-bottom:0}
+.node::before{
+  content:"";position:absolute;left:0;top:4px;width:11px;height:11px;border-radius:50%;
+  border:2px solid var(--line);background:var(--card);box-sizing:border-box;
+}
+.node::after{content:"";position:absolute;left:5px;top:15px;bottom:0;width:1px;background:var(--line)}
+.node:last-child::after{display:none}
+.node.on::before{border-color:var(--shell);background:var(--shell)}
+.node .t{font-size:15px;color:var(--muted)}
+.node.on .t{color:var(--shell-deep);font-weight:600}
+.node .d{font-size:13px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
+.copy{
+  border:1px solid var(--line);border-radius:8px;background:none;color:var(--shell);
+  font-size:12px;padding:3px 10px;width:auto;margin:0 0 0 8px;font-weight:400;
+}
+.foot{text-align:center;color:var(--muted);font-size:12px;margin-top:40px}
+@media (prefers-reduced-motion:no-preference){.result.on{animation:in .2s ease-out}}
+@keyframes in{from{opacity:0}to{opacity:1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">蟹记</div>
+  <h1>查一下你的订单</h1>
+
+  <form class="card" id="f" autocomplete="off">
+    <label for="no">订单号</label>
+    <input id="no" name="no" inputmode="numeric" placeholder="20260914-007" required>
+
+    <div class="gap">
+      <label>手机后四位</label>
+      <div class="tail" id="tail">
+        <input inputmode="numeric" maxlength="1" aria-label="手机后四位第1位">
+        <input inputmode="numeric" maxlength="1" aria-label="手机后四位第2位">
+        <input inputmode="numeric" maxlength="1" aria-label="手机后四位第3位">
+        <input inputmode="numeric" maxlength="1" aria-label="手机后四位第4位">
+      </div>
+    </div>
+
+    <button type="submit" id="go">查询</button>
+    <div class="err" id="err"></div>
+  </form>
+
+  <div class="card result" id="r"></div>
+  <div class="foot">蟹记</div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id) }
+  var noEl = $('no'), errEl = $('err'), goEl = $('go'), rEl = $('r')
+  var tails = [].slice.call($('tail').getElementsByTagName('input'))
+
+  // 链接带 ?no= 时自动填好并锁住，买家只用填后四位
+  var q = new URLSearchParams(location.search)
+  var preset = (q.get('no') || '').trim()
+  if (preset) { noEl.value = preset; noEl.disabled = true; tails[0].focus() }
+
+  // 四个格子自动前进后退，粘贴四位数字也能一次填满
+  tails.forEach(function (box, i) {
+    box.addEventListener('input', function () {
+      var v = box.value.replace(/\D/g, '')
+      if (v.length > 1) {
+        v.split('').forEach(function (ch, k) { if (tails[i + k]) tails[i + k].value = ch })
+        var last = Math.min(i + v.length, tails.length - 1)
+        tails[last].focus()
+      } else {
+        box.value = v
+        if (v && tails[i + 1]) tails[i + 1].focus()
+      }
+    })
+    box.addEventListener('keydown', function (e) {
+      if (e.key === 'Backspace' && !box.value && tails[i - 1]) tails[i - 1].focus()
+    })
+  })
+
+  function tailValue() { return tails.map(function (b) { return b.value }).join('') }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    })
+  }
+
+  function fmt(v) {
+    if (!v) return ''
+    var d = new Date(String(v).replace(/-/g, '/').replace('T', ' ').replace(/\.\d+.*$/, '').replace(/Z$/, ''))
+    if (isNaN(d.getTime())) return ''
+    var p = function (n) { return n < 10 ? '0' + n : '' + n }
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + p(d.getHours()) + ':' + p(d.getMinutes())
+  }
+
+  function node(on, title, detail, extra) {
+    return '<div class="node' + (on ? ' on' : '') + '">' +
+      '<div class="t">' + esc(title) + (extra || '') + '</div>' +
+      (detail ? '<div class="d">' + esc(detail) + '</div>' : '') + '</div>'
+  }
+
+  function render(o) {
+    var shipped = o.ship_status === 'shipped' || o.ship_status === 'received'
+    var received = o.ship_status === 'received'
+    var track = ''
+    if (shipped && o.tracking_no) {
+      track = '<button class="copy" type="button" data-copy="' + esc(o.tracking_no) + '">复制</button>'
+    }
+
+    var html =
+      '<div class="no">' + esc(o.order_no) + '</div>' +
+      '<div class="who">' + esc(o.receiver_name) + '　' + esc(o.receiver_phone) + '</div>' +
+      '<div class="addr">' + esc(o.receiver_address) + '</div>' +
+      (o.items_summary ? '<div class="items">' + esc(o.items_summary) + '</div>' : '') +
+      '<div class="line">' +
+        node(received, '已收货', received ? fmt(o.received_at) : '') +
+        node(shipped, shipped ? '已发货' : '还没发出',
+             shipped ? ((o.ship_company || '') + ' ' + (o.tracking_no || '')).trim() + (o.shipped_at ? '　' + fmt(o.shipped_at) : '') : '',
+             track) +
+        node(true, '已记录', fmt(o.created_at)) +
+      '</div>'
+
+    rEl.innerHTML = html
+    rEl.className = 'card result on'
+
+    var btn = rEl.querySelector('.copy')
+    if (btn) {
+      btn.addEventListener('click', function () {
+        var text = btn.getAttribute('data-copy')
+        var done = function () { btn.textContent = '已复制'; setTimeout(function () { btn.textContent = '复制' }, 1500) }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, fallback)
+        } else { fallback() }
+        function fallback() {
+          var ta = document.createElement('textarea')
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
+          document.body.appendChild(ta); ta.select()
+          try { document.execCommand('copy'); done() } catch (e) { /* 复制不了就让用户自己长按选 */ }
+          document.body.removeChild(ta)
+        }
+      })
+    }
+  }
+
+  // 查不到就一句话，不区分是单号错了还是后四位错了
+  var MISS = '没找到这个订单，检查一下订单号和手机后四位'
+
+  $('f').addEventListener('submit', function (e) {
+    e.preventDefault()
+    var no = noEl.value.trim()
+    var tail = tailValue()
+    rEl.className = 'card result'
+    if (!no) { errEl.textContent = '订单号还没填'; return }
+    if (!/^\d{4}$/.test(tail)) { errEl.textContent = '手机后四位填满'; return }
+
+    errEl.textContent = ''
+    goEl.disabled = true
+    goEl.textContent = '查询中'
+
+    var url = '/api/public/orders?order_no=' + encodeURIComponent(no) + '&phone_tail=' + encodeURIComponent(tail)
+    var req = new XMLHttpRequest()
+    req.open('GET', url, true)
+    req.timeout = 15000
+    req.onload = function () {
+      goEl.disabled = false
+      goEl.textContent = '查询'
+      var body
+      try { body = JSON.parse(req.responseText) } catch (x) { body = null }
+      if (req.status === 200 && body && body.code === 0 && body.data) render(body.data)
+      else errEl.textContent = MISS
+    }
+    req.onerror = req.ontimeout = function () {
+      goEl.disabled = false
+      goEl.textContent = '查询'
+      errEl.textContent = '网络不太好，再试一次'
+    }
+    req.send()
+  })
+})()
+</script>
+</body>
+</html>

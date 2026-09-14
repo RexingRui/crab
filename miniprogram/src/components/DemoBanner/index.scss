@@ -1,0 +1,9 @@
+@use '../../styles-tokens.scss' as *;
+
+.demo-banner {
+  background: rgba(232, 180, 74, 0.22);
+  color: #886111;
+  font-size: 24px;
+  padding: 12px 24px;
+  text-align: center;
+}

@@ -1,0 +1,54 @@
+@use '../../styles-tokens.scss' as *;
+
+.home {
+  &__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 32px 24px 8px;
+  }
+
+  &__date { display: block; margin-top: 6px; }
+  &__gear { font-size: 26px; color: $shell; padding: 8px; }
+  &__link { font-size: 26px; color: $shell; }
+
+  &__more {
+    display: block;
+    text-align: center;
+    padding: 20px 0;
+    font-size: 26px;
+    color: $shell;
+  }
+
+  &__stats { padding: 0; }
+
+  &__stat {
+    display: flex;
+    align-items: center;
+    padding: 28px 24px;
+
+    &-label { flex: none; font-size: 28px; }
+    &-value { flex: 1; text-align: right; font-size: 30px; font-weight: 600; padding-right: 16px; }
+    &-arrow { color: $muted; font-size: 30px; }
+  }
+
+  // 未收款的钱是要动手的事，给金爪色
+  &__stat:first-child &__stat-value { color: $claw; }
+
+  &__recent {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 24px;
+    border-bottom: 1px solid $line;
+
+    &:last-child { border-bottom: none; }
+
+    &-day { width: 100px; flex: none; }
+    &-name { flex: 1; font-size: 28px; }
+    &-money { font-size: 28px; }
+    &-tags { display: flex; gap: 8px; }
+  }
+
+  &__blank { display: block; padding: 48px; text-align: center; }
+}

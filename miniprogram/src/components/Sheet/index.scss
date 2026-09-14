@@ -1,0 +1,44 @@
+@use '../../styles-tokens.scss' as *;
+
+.sheet-mask {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(28, 35, 30, 0.4);
+  z-index: 50;
+}
+
+.sheet {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  max-height: 80vh;
+  background: $card;
+  border-radius: 24px 24px 0 0;
+  @include float-shadow;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 28px 24px 16px;
+  }
+
+  &__title { font-size: 30px; font-weight: 600; }
+  &__close { font-size: 26px; color: $muted; }
+
+  &__body {
+    padding: 0 24px 24px;
+    overflow-y: auto;
+  }
+
+  &__foot {
+    padding: 16px 24px 24px;
+    border-top: 1px solid $line;
+    display: flex;
+    gap: 16px;
+  }
+}

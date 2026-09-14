@@ -1,0 +1,77 @@
+@use '../../styles-tokens.scss' as *;
+
+.orders {
+  &__bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 24px 12px;
+    background: $belly;
+  }
+
+  &__search {
+    flex: 1;
+    background: $card;
+    border: 1px solid $line;
+    border-radius: $radius-btn;
+    padding: 18px 24px;
+    font-size: 28px;
+  }
+
+  &__filter { font-size: 28px; color: $shell; padding: 0 8px; }
+
+  &__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 4px 24px 20px;
+  }
+
+  &__chip {
+    padding: 10px 24px;
+    border: 1px solid $line;
+    border-radius: $radius-tag;
+    background: $card;
+    font-size: 26px;
+    color: $muted;
+
+    &--on {
+      border-color: $shell;
+      background: rgba(47, 71, 57, 0.06);
+      color: $shell;
+      font-weight: 600;
+    }
+  }
+
+  &__group { margin-bottom: 8px; }
+
+  // 组标题吸顶
+  &__group-title {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 12px 24px;
+    background: $belly;
+    font-size: 26px;
+    color: $muted;
+  }
+
+  &__group-body { padding: 0 24px; }
+
+  &__foot {
+    display: block;
+    text-align: center;
+    padding: 24px 0 40px;
+  }
+
+  &__option {
+    margin-bottom: 32px;
+
+    &-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-top: 16px;
+    }
+  }
+}

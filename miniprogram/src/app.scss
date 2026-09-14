@@ -1,0 +1,140 @@
+@use './styles-tokens.scss' as *;
+
+/* Taro 的 pxtransform 会按 750 设计稿把这里的 px 换成 rpx（1:1），
+ * 所以下面的数值直接照技术方案里的 rpx 写。 */
+
+page,
+.taro_page {
+  background: $belly;
+  color: $shell-deep;
+  font-size: 28px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+view, text, input, textarea, button, scroll-view {
+  box-sizing: border-box;
+}
+
+.page {
+  min-height: 100vh;
+  padding-bottom: 40px;
+}
+
+.page--with-bar {
+  padding-bottom: 180px; // 给吸底操作条让位
+}
+
+.num {
+  @include tnum;
+}
+
+.page-title { font-size: 40px; font-weight: 600; }
+.group-title { font-size: 30px; font-weight: 600; }
+.sub { font-size: 24px; color: $muted; }
+.money { @include tnum; }
+.money-lg { @include tnum; font-size: 48px; font-weight: 600; }
+
+.card { @include card; }
+
+.section {
+  margin: 24px;
+}
+
+.section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.divider {
+  height: 1px;
+  background: $line;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: $radius-btn;
+  font-size: 28px;
+  line-height: 1;
+  padding: 22px 32px;
+  border: none;
+  margin: 0;
+
+  &::after { border: none; }
+
+  &--primary { background: $shell; color: #fff; }
+  &--ghost { background: transparent; color: $shell; border: 1px solid $line; }
+  &--danger { background: $boiled; color: #fff; }
+  &--sm { padding: 14px 24px; font-size: 26px; }
+  &--block { display: flex; width: 100%; }
+
+  &[disabled] { opacity: 0.45; }
+}
+
+.bar-bottom {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: $card;
+  border-top: 1px solid $line;
+  box-shadow: 0 -4px 20px rgba(28, 35, 30, 0.08);
+  padding: 16px 24px;
+  padding-bottom: calc(16px + constant(safe-area-inset-bottom));
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 40;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid $line;
+
+  &:last-child { border-bottom: none; }
+
+  &__label {
+    width: 140px;
+    flex: none;
+    color: $muted;
+    font-size: 28px;
+  }
+
+  &__input {
+    flex: 1;
+    font-size: 28px;
+    color: $shell-deep;
+  }
+
+  &--textarea {
+    align-items: flex-start;
+    .field__label { padding-top: 6px; }
+  }
+}
+
+.field__input--highlight {
+  animation: fieldFlash 1s ease-out;
+}
+
+/* 动效只在状态变更时出现，不做入场动画 */
+@keyframes fieldFlash {
+  0% { background: rgba(232, 180, 74, 0.45); }
+  100% { background: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field__input--highlight { animation: none; }
+}
