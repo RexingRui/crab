@@ -289,8 +289,14 @@ npm run dev:weapp        # 或 npm run build:weapp
 npm test                 # 地址解析与金额换算的单测
 ```
 
-编译完用微信开发者工具打开 `miniprogram/` 目录。接口域名在 `src/utils/config.js` 里改，
-也可以在小程序「设置」页临时改，存本地；小程序后台记得配 request 合法域名。
+编译完用微信开发者工具打开 `miniprogram/` 目录。接口域名**构建时注入**，不在源码里写死：
+
+```bash
+TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain npm run build:weapp
+```
+
+不传就退回 `src/utils/config.js` 里的占位域名 `https://example.com`；也可以在小程序「设置」页
+临时改，存本地。小程序后台记得配 request 合法域名。上传体验版见下面的「小程序上传」。
 
 页面：今天（要发的清单 + 汇总）、记一笔（录单）、全部（列表筛选）、详情、设置。
 
@@ -369,7 +375,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now crab-order
       }
   }
   ```
-- **小程序**：微信开发者工具里上传代码、提交审核，与服务端部署无关。
+- **小程序**：见下面的「小程序上传」，走 CLI，不用开发者工具点上传。与服务端部署无关。
 - **备份**：`scripts/backup.sh` 用 `sqlite3 .backup` 做热备（WAL 模式下**不要直接 cp**，可能拷到不一致的状态），保留最近 30 天。建议 crontab 每天凌晨跑一次：
 
   ```cron
@@ -377,6 +383,70 @@ sudo systemctl daemon-reload && sudo systemctl enable --now crab-order
   ```
 
 - **优雅退出**：收到 `SIGINT`/`SIGTERM` 后给在途请求 10 秒排空，之后关闭数据库连接。
+
+### 小程序上传
+
+用微信官方的 [`miniprogram-ci`](https://developers.weixin.qq.com/miniprogram/dev/devtools/ci.html)
+把 `dist/` 传到微信后台，不用开发者工具点「上传」。开发者工具只留着本地调试用。
+
+**一次性准备**
+
+1. 小程序后台 →「开发管理 → 开发设置 → 小程序代码上传密钥」生成密钥，下载 `private.<appid>.key`。
+   密钥**只能下载一次**，丢了就重置；仓库里不放它（`.gitignore` 已经挡掉 `private.*.key`）。
+2. 同一页面的 **IP 白名单**：GitHub 托管 runner 出口 IP 不固定，用它就得关掉白名单；
+   要留白名单就换自建 runner，把固定 IP 填进去。
+3. `project.config.json` 里的 `appid` 仍是 `touristappid`，真实 AppID 通过 `WX_APPID` 传，
+   不进仓库。开发者工具本地调试时自己填。
+
+**本地跑一次**
+
+```bash
+cd miniprogram
+cp .env.example .env          # 填 appid、密钥路径、域名
+set -a && . ./.env && set +a  # 或用 direnv / dotenv 之类
+npm run build:weapp
+npm run ci:preview            # 生成预览码 dist/preview.jpg，微信扫码开开发版
+npm run ci:upload             # 传体验版
+```
+
+仓库根目录也有对应的 make 目标：`make mp-build` / `make mp-preview` / `make mp-upload`，
+后两个会自动先构建。
+
+脚本是 `miniprogram/scripts/mp-ci.js`，参数都能用环境变量代替：
+
+| 参数 | 环境变量 | 默认值 |
+| --- | --- | --- |
+| `--version` | `MP_VERSION` | `package.json` 的 `version` |
+| `--desc` | `MP_DESC` | `版本号 @ 提交号` |
+| `--robot` | `WX_CI_ROBOT` | `1`（1-30，不同用途占不同号，后台好区分） |
+| `--page` / `--query` | — | 仅 `preview`，指定打开的页面与参数 |
+| — | `WX_APPID` | 无，必填 |
+| — | `WX_PRIVATE_KEY` / `WX_PRIVATE_KEY_PATH` | 无，二选一必填 |
+
+几个会踩的点：
+
+- 传的是 `dist/`，所以**先构建再上传**；`src/` 比 `dist/` 新时脚本会警告可能在传旧产物。
+- 上传用的 `setting` 取 `project.config.json` 里那份（`es6` / `minified` / `postcss` 全 `false`）。
+  Taro 自己已经编译压缩过了，再让微信编译一次反而容易出问题，别去打开。
+- `version` 同时决定包里「设置」页显示的版本号（构建期由 `MP_VERSION` 注入），
+  所以构建和上传要用**同一个**版本号——CI 里已经是同一个变量。
+- 上传完还要去后台「版本管理」把这一版设成体验版或提交审核，CLI 不代劳。
+  提审前记得先把自己的 openid 填进服务端 `ADMIN_OPENIDS`，否则审核演示模式不会触发。
+
+**GitHub Actions**
+
+`.github/workflows/miniprogram-deploy.yml`，两种触发：打 `mp-v*` 标签（版本号取标签名，
+`mp-v0.1.1` → `0.1.1`），或者在 Actions 页手动跑，可选 `upload` / `preview`、版本号、备注、robot。
+流程是 `npm ci` → `npm test` → 带域名构建 → 上传；`preview` 的二维码作为 artifact 留存。
+
+仓库里要配：
+
+| 类型 | 名字 | 说明 |
+| --- | --- | --- |
+| Secret | `WX_APPID` | 小程序 AppID |
+| Secret | `WX_PRIVATE_KEY` | 上传密钥全文 |
+| Variable | `TARO_APP_API_BASE_URL` | 接口域名，没配直接让构建失败，免得发出指向 `example.com` 的包 |
+| Variable | `TARO_APP_TRACK_URL` | 买家查单页域名 |
 
 ## 本期不含
 

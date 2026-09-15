@@ -1,4 +1,4 @@
-.PHONY: build run test test-race cover fmt vet tidy clean
+.PHONY: build run test test-race cover fmt vet tidy clean mp-build mp-preview mp-upload
 
 BIN := bin/crab-server
 
@@ -29,3 +29,14 @@ tidy:
 
 clean:
 	rm -rf bin coverage.out
+
+# ---- 小程序（miniprogram/，详见 README「小程序上传」）----
+
+mp-build:
+	cd miniprogram && npm run build:weapp
+
+mp-preview: mp-build
+	cd miniprogram && npm run ci:preview
+
+mp-upload: mp-build
+	cd miniprogram && npm run ci:upload

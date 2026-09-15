@@ -1,5 +1,17 @@
 const path = require('path')
 
+/* 构建期注入的环境变量：部署时把真实域名传进来，源码里不写死。
+ * 用法：TARO_APP_API_BASE_URL=https://your.domain npm run build:weapp
+ * 没传就退回 src/utils/config.js 里的占位域名，本地开发照常。 */
+const envConstants = ['TARO_APP_API_BASE_URL', 'TARO_APP_TRACK_URL'].reduce((acc, key) => {
+  acc[`process.env.${key}`] = JSON.stringify(process.env[key] || '')
+  return acc
+}, {})
+
+/* 设置页显示的版本号与上传体验版的版本号同一个来源：package.json */
+envConstants['process.env.TARO_APP_VERSION'] =
+  JSON.stringify(process.env.MP_VERSION || require('../package.json').version)
+
 const config = {
   projectName: 'crab-note',
   date: '2026-9-14',
@@ -8,7 +20,7 @@ const config = {
   sourceRoot: 'src',
   outputRoot: 'dist',
   plugins: [],
-  defineConstants: {},
+  defineConstants: envConstants,
   copy: { patterns: [], options: {} },
   framework: 'react',
   compiler: { type: 'webpack5', prebundle: { enable: false } },

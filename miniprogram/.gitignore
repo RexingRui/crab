@@ -4,3 +4,8 @@ dist/
 .rn_temp/
 .swc/
 *.log
+
+# 本地构建 / 部署配置与上传密钥，绝不能进仓库
+.env
+.env.local
+private.*.key
