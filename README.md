@@ -362,6 +362,12 @@ docker compose --profile proxy up -d
 数据库落在宿主机的 `./data/`，容器重建不丢数据。改完 `.env` 要用 `docker compose up -d`
 （`restart` 不重新读环境变量）。
 
+后续更新一条命令（备份 → 拉代码 → 构建 → 滚动替换 → `/healthz` 自检，不过则自动回滚代码与镜像）：
+
+```bash
+ssh <服务器> 'cd /opt/crab-order && ./scripts/deploy.sh'
+```
+
 裸机 + systemd：
 
 ```bash

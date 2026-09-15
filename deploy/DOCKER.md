@@ -11,6 +11,7 @@
 | `docker-compose.yml` | `api` 服务；可选的 `caddy` 服务（`proxy` profile） |
 | `deploy/Caddyfile` | 容器化 Caddy 的配置：`/api` 反代后端、`/t` 托管买家查单页 |
 | `scripts/docker-backup.sh` | 宿主机 crontab 调用，在容器里做 SQLite 热备份 |
+| `scripts/deploy.sh` | 更新线上：备份 → 拉代码 → 构建 → 替换 → 自检，不过则自动回滚 |
 
 ## 腾讯云轻量应用服务器
 
@@ -243,16 +244,71 @@ sudo crontab -e
 
 备份只在本机意义不大，建议再用 rsync / 对象存储把 `backup/` 同步出去。
 
-## 7. 升级与回滚
+## 7. 更新与回滚
+
+日常更新一条命令，在服务器上：
 
 ```bash
-cd /opt/crab-order
-git pull
-docker compose up -d --build        # 重新构建并滚动替换容器，data/ 里的数据不动
-docker image prune -f               # 清理旧镜像层
+cd /opt/crab-order && ./scripts/deploy.sh      # 等价于 make deploy
 ```
 
-升级前先备份一次（第 6 节）。回滚就是 `git checkout <上一个提交> && docker compose up -d --build`。
+或者从本地一把梭，不用登机器：
+
+```bash
+ssh <服务器> 'cd /opt/crab-order && ./scripts/deploy.sh'
+```
+
+它按顺序做这几件事，任何一步出问题都不会让线上停在半截状态：
+
+| 步骤 | 失败时 |
+|---|---|
+| 工作区必须干净、分支必须对得上 | 直接拒绝，什么都不动 |
+| 数据库热备（调 `docker-backup.sh`） | 中止部署 |
+| `git fetch` + `git merge --ff-only` | 中止部署（生产机上不产生合并提交） |
+| `docker compose build` | 代码退回原提交，线上仍跑旧容器 |
+| `docker compose up -d` 滚动替换 | —— |
+| 在容器里打 `/healthz`，最多等 60s | 打印新版本日志，回滚代码 + 回滚镜像并重启 |
+
+可用的环境变量：`BRANCH`（默认 `main`）、`HEALTH_TIMEOUT`（默认 60 秒）、`SKIP_BACKUP=1`。
+
+**只改了 `.env`**（比如填 `ADMIN_OPENIDS`）不用走 deploy，代码没变：
+
+```bash
+docker compose up -d
+```
+
+**手动回滚到任意历史版本**：
+
+```bash
+git reset --hard <提交号> && docker compose up -d --build
+```
+
+上一个版本的镜像会被打上 `crab-order:rollback` 留着，所以紧急回退也可以不重新构建：
+
+```bash
+docker image tag crab-order:rollback crab-order:latest
+docker compose up -d --force-recreate api
+```
+
+攒了几次更新之后清一下旧镜像层（`rollback` 标签不会被清掉）：
+
+```bash
+docker image prune -f
+```
+
+### 要不要上自动部署（CD）
+
+个人项目、单机 SQLite、更新节奏跟着小程序审核走，**不建议**做 push 即自动发布：
+
+- 自动部署的价值在于「一天十几次发布」，这个项目一周可能一次。
+- 真要 GitHub Actions 直连这台机器，得把 SSH 暴露给 GitHub 的 IP 段，或者在生产机上常驻
+  self-hosted runner —— 为了省一条命令，换来一个常开的入口，不划算。
+- SQLite 是单机文件，没有多实例滚动发布的问题，`deploy.sh` 这种「原地替换 + 自检 + 回滚」
+  已经把该有的保护都做了。
+
+建议的分工是 **CI 自动、CD 手动**：GitHub 上自动跑测试（见 `.github/workflows/ci.yml`），
+发布由人敲一条 `deploy.sh`。等哪天真的需要自动发布了，再让 Actions 构建镜像推到
+腾讯云 TCR，服务器侧改成 `docker compose pull && up -d` 即可，`deploy.sh` 的骨架不用变。
 
 ## 常见问题
 
