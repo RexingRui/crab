@@ -1,157 +1,140 @@
-# 迭代部署手册（mini-deploy）
+# 小程序发版手册（mini-deploy）
 
-写给「本机是 iPad、服务器是一台腾讯云」的日常发版场景。
-首次部署的完整细节在 [README 的「部署」一节](README.md#部署)，这里只讲**每次迭代怎么走**。
+只讲小程序怎么发版。后端部署看 [README 的「部署」一节](README.md#部署)，两件事互不相干：
+改小程序不用碰服务器。
 
-## 谁在哪儿跑
+## 一句话
 
-iPad 不参与构建，它只是遥控器：浏览器点 GitHub Actions，SSH 客户端（Termius / Blink /
-腾讯云控制台自带的网页终端）连服务器。真正干活的是另外三处。
+**打一个 `mp-v*` 标签，GitHub Actions 自动构建并上传到微信后台。**
+版本号从标签名来，`mp-v0.1.1` → `0.1.1`，不用改任何文件。
 
-```
-   iPad Pro                                    你只做两件事：
-   ├── 浏览器 → GitHub                          push 代码、点一下发布
-   └── SSH   → 腾讯云
-                     │
-        ┌────────────┴─────────────┐
-        ▼                          ▼
-  GitHub Actions              腾讯云服务器（Ubuntu/Debian）
-  构建小程序 dist/            ├── crab-server (systemd, 127.0.0.1:8080)
-  miniprogram-ci 上传         ├── SQLite /opt/crab-order/data/crab.db
-        │                     └── Caddy: /api → 8080, /t → 查单页, 自动 HTTPS
-        ▼
-  微信小程序后台
-  开发版 → 体验版 → 提审 → 线上
+```bash
+git tag mp-v0.1.1 && git push origin mp-v0.1.1
 ```
 
-**两条线互相独立**：改后端不用重发小程序，改小程序不用碰服务器。
-只有接口契约变了才需要一起发，顺序是**先后端后小程序**（旧小程序要能跑在新后端上）。
+## 自动到哪一步（重要）
+
+自动化只能做到「代码进微信后台」为止，后面三步微信强制人工，任何 CLI 都代劳不了：
+
+```
+  打 tag ──▶ GitHub Actions ─────────────────▶ 微信后台「开发版本」
+             npm ci → 单测 → 构建 → 上传          ↑ 自动到这里为止
+                                                  │
+                            ─────────────────────┴──────────────────────
+                            以下在微信后台手点：
+                            选为体验版 → 提交审核 → 审核通过后点「发布」
+```
+
+所以「打 tag 就自动部署」这个理解，准确说是**自动打包上传**：
+两三分钟后你在后台「管理 → 版本管理 → 开发版本」里能看到这一版，
+然后自己决定是设成体验版自测，还是直接提审。审核通过后还要再点一次「发布」才真正上线。
+
+微信不开放「自动提审/自动发布」给个人主体的普通小程序，这是平台规则，不是这套流程偷懒。
 
 ## 一次性准备
 
-做完这一节，后面每次发版就只剩「点一下」。
+只需做一次，两个地方。
 
-### 1. 腾讯云服务器
+### 微信小程序后台
 
-按 README 的「部署」一节装好：编译好的二进制放 `/opt/crab-order/bin/`、`.env` 放
-`/opt/crab-order/.env`、`crab-order.service` 装进 systemd、Caddy 反代 `/api` 和 `/t`。
-另外为了后面能在服务器上自助构建，装上 Go 和 git：
+1. 「开发管理 → 开发设置 → 服务器域名」：把 `https://你的域名` 加进 **request 合法域名**。
+   小程序只能请求这里登记过的域名，漏了就是所有接口都失败。
+2. 「开发管理 → 开发设置 → 小程序代码上传密钥」：生成并下载 `private.<appid>.key`。
+   **只能下载一次**，丢了只能重置。
+3. 同一页的 **IP 白名单要关掉** —— GitHub 托管 runner 出口 IP 不固定，开着必然 403。
+   想保留白名单见文末。
 
-```bash
-# 服务器上，一次
-sudo apt update && sudo apt install -y git sqlite3
-curl -fsSL https://go.dev/dl/go1.22.12.linux-amd64.tar.gz | sudo tar -C /usr/local -xz  # ≥1.22 即可
-echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee /etc/profile.d/go.sh
-sudo mkdir -p /opt/crab-order/src && sudo chown "$USER" /opt/crab-order/src
-git clone https://github.com/RexingRui/crab.git /opt/crab-order/src
-```
+### GitHub 仓库
 
-源码目录用你自己的账号拿着就行，编译也用你自己跑（`crab` 这个用户是给 systemd 跑服务用的，
-它只需要拥有 `/opt/crab-order/data`）。装完 Go 记得 `source /etc/profile.d/go.sh` 或重连一次 SSH。
-
-`.env` 里必须填对的三个：`AUTH_SECRET`（`openssl rand -hex 32`）、`WECHAT_APPID` /
-`WECHAT_SECRET`、`ADMIN_OPENIDS`（你自己的 openid，不填就是谁都能登的引导模式）。
-`HTTP_ADDR` 保持 `127.0.0.1:8080`，外网由 Caddy 兜。
-
-> 内存小于 2G 的轻量服务器编译 Go 可能被 OOM 杀掉（`modernc.org/sqlite` 是纯 Go 实现，
-> 挺吃内存）。加 2G swap 就能过：
-> `sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`。
-> 实在不想在服务器上编译，看文末的「不想在服务器上编译」。
-
-### 2. 微信小程序后台
-
-1. 「开发管理 → 开发设置 → 服务器域名」把 `https://你的域名` 加进 **request 合法域名**。
-2. 同页面「小程序代码上传密钥」生成并下载 `private.<appid>.key`，**只能下载一次**。
-3. 同页面的 **IP 白名单要关掉** —— GitHub 托管 runner 的出口 IP 不固定。
-   想保留白名单就走文末的「自建 runner」。
-
-### 3. GitHub 仓库
-
-Settings → Secrets and variables → Actions，配四项：
+Settings → Secrets and variables → Actions，配四项（前两个是 Secret，后两个是 Variable）：
 
 | 类型 | 名字 | 值 |
 | --- | --- | --- |
 | Secret | `WX_APPID` | 小程序 AppID |
-| Secret | `WX_PRIVATE_KEY` | `private.<appid>.key` 全文（连 BEGIN/END 行一起贴） |
-| Variable | `TARO_APP_API_BASE_URL` | `https://你的域名` |
-| Variable | `TARO_APP_TRACK_URL` | `https://你的域名` |
+| Secret | `WX_PRIVATE_KEY` | `private.<appid>.key` 全文，连 `-----BEGIN/END-----` 一起贴 |
+| Variable | `TARO_APP_API_BASE_URL` | `https://你的域名`，接口域名，会打进包里 |
+| Variable | `TARO_APP_TRACK_URL` | `https://你的域名`，买家查单页域名 |
 
-密钥文件在 iPad 上不好打开，可以在 GitHub 网页版直接把下载下来的 key 文件内容粘进 Secret 输入框。
+密钥文件在 iPad 上不方便打开，直接在 GitHub 网页版把文件内容粘进 Secret 输入框就行。
+这两个 Variable 不配，构建会直接失败退出，免得发出一个指向 `example.com` 的包。
 
-## 日常迭代
+## 发一版
 
-### A. 只改了后端（Go）
+iPad 浏览器里全程可做，不需要电脑、不需要开发者工具。
 
-```bash
-# SSH 上服务器
-cd /opt/crab-order/src
-git pull origin main
-make build                                  # 产出 /opt/crab-order/src/bin/crab-server
-sudo cp /opt/crab-order/bin/crab-server /opt/crab-order/bin/crab-server.prev   # 留一手好回滚
-sudo systemctl stop crab-order
-sudo cp bin/crab-server /opt/crab-order/bin/crab-server
-sudo systemctl start crab-order
-systemctl status crab-order --no-pager      # 确认 active (running)
-curl -sS localhost:8080/healthz             # 返回 {"code":0,...} 就算起来了
-```
+1. 代码合进 `main`。
+2. 打标签：`mp-v0.1.1`。在 GitHub 网页上也能打 —— 仓库首页 → Releases → Draft a new release
+   → Choose a tag 里直接输 `mp-v0.1.1` → Publish。
+3. 去 Actions 看「小程序上传」跑完（约 2–3 分钟）。
+4. 微信后台「版本管理 → 开发版本」找到这一版 → 选为体验版，或提交审核。
+5. 审核通过后点「发布」。
 
-停机时间就是 `stop`→`start` 之间那一两秒。数据库不用动，表结构迁移在程序启动时自己跑。
+版本号用微信认的格式：**只能是数字和点**，`0.1.1` 可以，`v0.1.1`、`0.1.1-beta` 会被拒
+（标签前面的 `mp-v` 由 workflow 自己剥掉，不算在内）。同一个版本号可以重复传，后传的覆盖前传的。
 
-### B. 只改了小程序
+这个版本号同时会显示在小程序「设置」页底部，方便你对着后台确认用户装的是哪一版。
 
-全程在 iPad 浏览器里完成，不需要 SSH：
+## 只想先真机看一眼
 
-1. 改 `miniprogram/package.json` 的 `version`（比如 `0.1.0` → `0.1.1`），提交。
-   这个版本号同时是体验版版本号和「设置」页显示的版本号，一处改两处生效。
-2. **打标签发布**：`git tag mp-v0.1.1 && git push origin mp-v0.1.1`，
-   或者在 GitHub → Actions →「小程序上传」→ Run workflow，手动选 `upload` 并填版本号、备注。
-3. Actions 跑完（`npm ci` → 单测 → 带域名构建 → 上传，约两三分钟），
-   去小程序后台「版本管理 → 开发版本」，把刚上传的这版**选为体验版**，或直接提交审核。
-4. 审核通过后点「发布」。
+不打标签，走手动触发的预览：
 
-想先在真机上看一眼再决定要不要提审，就把第 2 步的动作选成 `preview`：
-跑完在 Actions 的运行页面下载 artifact `miniprogram-preview-qrcode`，微信扫 `preview.jpg` 打开开发版。
+Actions →「小程序上传」→ Run workflow → `action` 选 **preview** → Run。
+跑完在这次运行的页面底部下载 artifact `miniprogram-preview-qrcode`，
+用微信扫里面的 `preview.jpg` 就能打开开发版。预览码有效期约 25 分钟，过期重跑一次。
 
-> 提审前确认服务端 `.env` 的 `ADMIN_OPENIDS` 已经填了你自己的 openid。
-> 否则审核员登录不会拿到 `40300`，只读演示模式不触发，审核看到的是一片空白。
+手动触发还能填这几项（都可留空）：
 
-### C. 两边都改了（接口契约变了）
-
-先 A 后 B，中间验证一次。因为线上还跑着老版本小程序，**后端的接口改动要向后兼容**：
-加字段可以，改字段名、改返回结构、删接口都会把线上用户打挂。
-真要做不兼容的改动，就先发一版后端同时认新老两种，等小程序线上版本都升级完再删老的。
+| 输入 | 作用 | 留空时 |
+| --- | --- | --- |
+| `version` | 版本号 | 取 `miniprogram/package.json` 的 `version` |
+| `desc` | 版本备注，后台版本列表里看得到 | `版本号 @ 提交号` |
+| `robot` | CI 机器人编号 1–30 | `1`。不同用途占不同号，后台好区分谁传的 |
 
 ## 回滚
 
-| 出问题的是 | 怎么退 |
+| 状态 | 怎么退 |
 | --- | --- |
-| 后端 | `sudo cp /opt/crab-order/bin/crab-server.prev /opt/crab-order/bin/crab-server && sudo systemctl restart crab-order` |
-| 小程序（已发布） | 小程序后台「版本管理 → 线上版本 → 版本回退」，退回上一个线上版本 |
-| 小程序（只到体验版） | 不用退，重新传一版把体验版换掉即可 |
-| 数据 | `/backup/crab-<日期>.db`（`scripts/backup.sh` 每天凌晨跑，留 30 天）：停服务 → 覆盖 `data/crab.db` → 删掉同名的 `-wal` / `-shm` → 启服务 |
+| 已发布上线 | 微信后台「版本管理 → 线上版本 → 版本回退」，退回上一个线上版本 |
+| 只到体验版 | 不用退，重新传一版把体验版换掉 |
+| 只到开发版 | 不用管，没用户能看到 |
 
-数据库回滚会丢掉备份点之后的数据，动手前先把当前的 `crab.db` 另存一份。
+代码侧对应地把有问题的提交 revert 掉，再打一个新标签（比如 `mp-v0.1.2`）重新走一遍。
+**不要复用或删了重打同一个标签**，后台会出现两个同版本号的记录，事后分不清哪个是哪个。
 
 ## 出错对照
 
 | 现象 | 多半是 |
 | --- | --- |
-| Actions 里 `getrandstr` / `tunneling socket` 403 | 上传密钥的 IP 白名单没关 |
-| Actions 报 `invalid signature` / `40013` | `WX_PRIVATE_KEY` 贴漏了 BEGIN/END 行，或 `WX_APPID` 和密钥不是同一个小程序 |
-| Actions 报「仓库变量 TARO_APP_API_BASE_URL 没配」 | Variable 配到了 Secret 里，或名字拼错 |
-| 上传成功但小程序里所有请求都失败 | 域名没加进 request 合法域名；或 Variable 填的域名带了末尾 `/` |
-| 版本号被拒 | 微信只认数字和点，`v0.1.1`、`0.1.1-beta` 都不行，标签的 `mp-v` 前缀由 workflow 自己剥掉 |
-| 小程序页面空白、只有顶部提示条 | 进了只读演示模式，服务端 `ADMIN_OPENIDS` 里没有你的 openid |
-| `systemctl status` 显示 `activating (auto-restart)` 反复重启 | `journalctl -u crab-order -n 50` 看日志，通常是 `.env` 缺 `AUTH_SECRET` 或 data 目录没权限 |
+| Actions 报 `tunneling socket` / 403 | 上传密钥的 IP 白名单没关 |
+| Actions 报 `invalid signature` / `40013` | `WX_PRIVATE_KEY` 贴漏了 BEGIN/END 行，或密钥和 `WX_APPID` 不是同一个小程序 |
+| Actions 报「仓库变量 TARO_APP_API_BASE_URL 没配」 | 配到 Secret 里去了，或名字拼错。它必须是 Variable |
+| 版本号被拒 | 带了 `v` 或后缀，微信只认数字和点 |
+| 传上去了，但小程序里所有请求都失败 | 域名没加进 request 合法域名；或 Variable 里的域名带了末尾 `/` |
+| 打了标签但 Actions 没触发 | 标签没 push 上去（`git push origin mp-v0.1.1`），或名字不匹配 `mp-v*` |
+| 页面空白、只有顶部一条提示 | 进了只读演示模式：服务端 `.env` 的 `ADMIN_OPENIDS` 里没有你的 openid。提审前务必先填 |
 
-## 两个可选项
+## 想保留 IP 白名单
 
-**自建 runner（想保留 IP 白名单）**：在腾讯云服务器上装 Node 20，按 GitHub → Settings →
-Actions → Runners 的指引注册成 self-hosted runner，再把 workflow 里的
-`runs-on: ubuntu-latest` 改成 `runs-on: self-hosted`。这样上传请求从服务器固定 IP 发出，
-白名单填这个 IP 就行。代价是服务器要常驻一个 runner 进程，构建时也吃它的 CPU 和内存。
+把一台固定公网 IP 的机器（比如你的腾讯云）注册成 GitHub 的 self-hosted runner：
+Settings → Actions → Runners → New self-hosted runner，按页面指引装好（机器上要有 Node 20），
+再把 `.github/workflows/miniprogram-deploy.yml` 里的 `runs-on: ubuntu-latest` 改成
+`runs-on: self-hosted`。之后上传请求从这台机器的固定 IP 发出，白名单填它即可。
+代价是这台机器要常驻一个 runner 进程，构建时也吃它的 CPU 和内存。
 
-**不想在服务器上编译**：让 GitHub Actions 交叉编译好二进制（`make build` 本来就是
-`CGO_ENABLED=0 GOOS=linux GOARCH=amd64`，产物是一个静态文件），传成 release asset，
-服务器上 `curl` 下来替换。适合内存吃紧的轻量服务器，代价是私有仓库下载 asset 要带 token。
-需要的话我可以补一个后端的 workflow。
+## 不用 CI，手动传
+
+没有 CI 或想在电脑上直接传时（iPad 上做不了，这里备个案）：
+
+```bash
+cd miniprogram
+cp .env.example .env            # 填 WX_APPID、WX_PRIVATE_KEY_PATH、两个域名
+set -a && . ./.env && set +a
+npm install
+npm run build:weapp
+npm run ci:preview              # 出预览码 dist/preview.jpg
+npm run ci:upload               # 传开发版
+```
+
+仓库根目录也有 `make mp-preview` / `make mp-upload`，会自动先构建。
+脚本是 `miniprogram/scripts/mp-ci.js`，用的是微信官方的
+[`miniprogram-ci`](https://developers.weixin.qq.com/miniprogram/dev/devtools/ci.html)。

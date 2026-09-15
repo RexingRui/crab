@@ -350,8 +350,7 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 
 ## 部署
 
-日常发版的流程（iPad 遥控 + 一台腾讯云 + GitHub Actions）单独写在
-[`mini-deploy.md`](mini-deploy.md)，本节是首次部署的细节。
+本节讲服务端。小程序发版是另一条线，见 [`mini-deploy.md`](mini-deploy.md)。
 
 ```bash
 make build
@@ -438,18 +437,9 @@ npm run ci:upload             # 传体验版
 
 **GitHub Actions**
 
-`.github/workflows/miniprogram-deploy.yml`，两种触发：打 `mp-v*` 标签（版本号取标签名，
-`mp-v0.1.1` → `0.1.1`），或者在 Actions 页手动跑，可选 `upload` / `preview`、版本号、备注、robot。
-流程是 `npm ci` → `npm test` → 带域名构建 → 上传；`preview` 的二维码作为 artifact 留存。
-
-仓库里要配：
-
-| 类型 | 名字 | 说明 |
-| --- | --- | --- |
-| Secret | `WX_APPID` | 小程序 AppID |
-| Secret | `WX_PRIVATE_KEY` | 上传密钥全文 |
-| Variable | `TARO_APP_API_BASE_URL` | 接口域名，没配直接让构建失败，免得发出指向 `example.com` 的包 |
-| Variable | `TARO_APP_TRACK_URL` | 买家查单页域名 |
+`.github/workflows/miniprogram-deploy.yml`：打 `mp-v*` 标签（版本号取标签名，`mp-v0.1.1` → `0.1.1`）
+或在 Actions 页手动跑，流程是 `npm ci` → `npm test` → 带域名构建 → 上传。
+需要配的 Secrets / Variables、发版步骤、回滚和排错都在 [`mini-deploy.md`](mini-deploy.md)。
 
 ## 本期不含
 
