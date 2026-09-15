@@ -79,7 +79,7 @@ function readAppid() {
     const conf = JSON.parse(fs.readFileSync(path.join(ROOT, 'project.config.json'), 'utf8'))
     if (conf.appid && conf.appid !== 'touristappid') return conf.appid
   } catch (e) { /* 读不到就按缺失处理 */ }
-  fail('缺少 appid：设置 WX_APPID，或把 project.config.json 里的 touristappid 换成真实 AppID。')
+  fail('缺少 appid：project.config.json 里的 appid 不是真实 AppID（还是 touristappid），也没给 WX_APPID。')
   return ''
 }
 

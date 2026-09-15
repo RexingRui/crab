@@ -1,10 +1,10 @@
 # 小程序上传：构建 Taro 产物后用微信官方 miniprogram-ci 传到微信后台。
 #
 # 需要在仓库配置：
-#   Secrets  WX_APPID          小程序 AppID
-#            WX_PRIVATE_KEY    小程序代码上传密钥（private.*.key 全文）
-#   Variables TARO_APP_API_BASE_URL  接口域名，如 https://crab.example.com
-#             TARO_APP_TRACK_URL     买家查单页域名，通常同上
+#   Secrets  WX_PRIVATE_KEY    小程序代码上传密钥（private.*.key 全文）—— 必需
+#            WX_APPID          小程序 AppID —— 可选，留空则取 project.config.json 里的
+#   Variables TARO_APP_API_BASE_URL / TARO_APP_TRACK_URL —— 可选，留空则用
+#             src/utils/config.js 里的正式域名；只在指向测试环境时才配
 #
 # 注意：上传密钥页面的 IP 白名单必须关掉，GitHub 托管 runner 的出口 IP 不固定。
 #      要保留白名单就换自建 runner，把它的固定 IP 填进去。
@@ -84,8 +84,7 @@ jobs:
           MP_VERSION: ${{ steps.meta.outputs.version }}
         run: |
           if [ -z "${TARO_APP_API_BASE_URL}" ]; then
-            echo "::error::仓库变量 TARO_APP_API_BASE_URL 没配，构建出来的包会指向占位域名"
-            exit 1
+            echo "::notice::没配 TARO_APP_API_BASE_URL，用 src/utils/config.js 里的正式域名"
           fi
           npm run build:weapp
 

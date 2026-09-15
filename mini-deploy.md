@@ -37,8 +37,8 @@ git tag mp-v0.1.1 && git push origin mp-v0.1.1
 
 ### 微信小程序后台
 
-1. 「开发管理 → 开发设置 → 服务器域名」：把 `https://你的域名` 加进 **request 合法域名**。
-   小程序只能请求这里登记过的域名，漏了就是所有接口都失败。
+1. 「开发管理 → 开发设置 → 服务器域名」：把 `src/utils/config.js` 里那个正式域名加进
+   **request 合法域名**。小程序只能请求这里登记过的域名，漏了就是所有接口都失败。
 2. 「开发管理 → 开发设置 → 小程序代码上传密钥」：生成并下载 `private.<appid>.key`。
    **只能下载一次**，丢了只能重置。
 3. 同一页的 **IP 白名单要关掉** —— GitHub 托管 runner 出口 IP 不固定，开着必然 403。
@@ -46,17 +46,25 @@ git tag mp-v0.1.1 && git push origin mp-v0.1.1
 
 ### GitHub 仓库
 
-Settings → Secrets and variables → Actions，配四项（前两个是 Secret，后两个是 Variable）：
+Settings → Secrets and variables → Actions，**只有一项是必需的**：
 
 | 类型 | 名字 | 值 |
 | --- | --- | --- |
-| Secret | `WX_APPID` | 小程序 AppID |
 | Secret | `WX_PRIVATE_KEY` | `private.<appid>.key` 全文，连 `-----BEGIN/END-----` 一起贴 |
-| Variable | `TARO_APP_API_BASE_URL` | `https://你的域名`，接口域名，会打进包里 |
-| Variable | `TARO_APP_TRACK_URL` | `https://你的域名`，买家查单页域名 |
 
 密钥文件在 iPad 上不方便打开，直接在 GitHub 网页版把文件内容粘进 Secret 输入框就行。
-这两个 Variable 不配，构建会直接失败退出，免得发出一个指向 `example.com` 的包。
+
+AppID 和域名已经写在仓库里（`miniprogram/project.config.json` 的 `appid`、
+`miniprogram/src/utils/config.js` 的两个域名），不用配。AppID 本来就打在分发包里，
+不是密钥；真正要保密的只有上传密钥。
+
+下面三项是可选的覆盖项，平时不用配，只在想传到另一个小程序、或想让包指向测试环境时才加：
+
+| 类型 | 名字 | 覆盖什么 |
+| --- | --- | --- |
+| Secret | `WX_APPID` | 传到哪个小程序 |
+| Variable | `TARO_APP_API_BASE_URL` | 包里的接口域名 |
+| Variable | `TARO_APP_TRACK_URL` | 包里的买家查单页域名 |
 
 ## 发一版
 
@@ -107,9 +115,9 @@ Actions →「小程序上传」→ Run workflow → `action` 选 **preview** �
 | --- | --- |
 | Actions 报 `tunneling socket` / 403 | 上传密钥的 IP 白名单没关 |
 | Actions 报 `invalid signature` / `40013` | `WX_PRIVATE_KEY` 贴漏了 BEGIN/END 行，或密钥和 `WX_APPID` 不是同一个小程序 |
-| Actions 报「仓库变量 TARO_APP_API_BASE_URL 没配」 | 配到 Secret 里去了，或名字拼错。它必须是 Variable |
 | 版本号被拒 | 带了 `v` 或后缀，微信只认数字和点 |
-| 传上去了，但小程序里所有请求都失败 | 域名没加进 request 合法域名；或 Variable 里的域名带了末尾 `/` |
+| 传上去了，但小程序里所有请求都失败 | 域名没加进 request 合法域名；或域名带了末尾 `/` |
+| 传到了别的小程序里 | `WX_APPID` 这个 Secret 配了，且和 `project.config.json` 里的不是同一个 |
 | 打了标签但 Actions 没触发 | 标签没 push 上去（`git push origin mp-v0.1.1`），或名字不匹配 `mp-v*` |
 | 页面空白、只有顶部一条提示 | 进了只读演示模式：服务端 `.env` 的 `ADMIN_OPENIDS` 里没有你的 openid。提审前务必先填 |
 
@@ -127,7 +135,7 @@ Settings → Actions → Runners → New self-hosted runner，按页面指引装
 
 ```bash
 cd miniprogram
-cp .env.example .env            # 填 WX_APPID、WX_PRIVATE_KEY_PATH、两个域名
+cp .env.example .env            # 只需填 WX_PRIVATE_KEY_PATH，appid 和域名仓库里已有
 set -a && . ./.env && set +a
 npm install
 npm run build:weapp

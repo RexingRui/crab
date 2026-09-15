@@ -295,8 +295,8 @@ npm test                 # 地址解析与金额换算的单测
 TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain npm run build:weapp
 ```
 
-不传就退回 `src/utils/config.js` 里的占位域名 `https://example.com`；也可以在小程序「设置」页
-临时改，存本地。小程序后台记得配 request 合法域名。上传体验版见下面的「小程序上传」。
+不传就用 `src/utils/config.js` 里的正式域名（改域名改那一处即可）；也可以在小程序「设置」页
+临时改，存本地。域名记得在小程序后台配成 request 合法域名。上传体验版见下面的「小程序上传」。
 
 页面：今天（要发的清单 + 汇总）、记一笔（录单）、全部（列表筛选）、详情、设置。
 
@@ -397,8 +397,8 @@ sudo systemctl daemon-reload && sudo systemctl enable --now crab-order
    密钥**只能下载一次**，丢了就重置；仓库里不放它（`.gitignore` 已经挡掉 `private.*.key`）。
 2. 同一页面的 **IP 白名单**：GitHub 托管 runner 出口 IP 不固定，用它就得关掉白名单；
    要留白名单就换自建 runner，把固定 IP 填进去。
-3. `project.config.json` 里的 `appid` 仍是 `touristappid`，真实 AppID 通过 `WX_APPID` 传，
-   不进仓库。开发者工具本地调试时自己填。
+3. AppID 已经写在 `project.config.json` 里（它本来就打在分发包里，不是密钥）。
+   要传到别的小程序时用 `WX_APPID` 覆盖，不用改文件。真正的密钥只有上传密钥一个。
 
 **本地跑一次**
 
