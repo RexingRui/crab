@@ -232,6 +232,15 @@ docker compose --profile proxy up -d
 （带 `X-Robots-Tag: noindex`）、其余路径一律 404。证书存在 `caddy-data` 卷里，
 **别随手 `docker compose down -v`**，删了要重新申请，会撞 ACME 频率限制。
 
+> **caddy 的 compose 命令都要带 `--profile proxy`**。不带的话 compose 直接把这个服务过滤掉，
+> `docker compose logs caddy` 会**静默返回空**，既不报错也不提示服务不存在，很容易误判成
+> 「容器起了但没日志」。看日志更省事的办法是用固定的容器名：`docker logs -f crab-caddy`。
+
+证书申请要求**公网能访问本机 80 端口**（ACME HTTP-01）。轻量云要在控制台防火墙放通 TCP 80
+**和 443**：只放 80 的话证书能签下来（Caddy 会从 tls-alpn-01 回退到 http-01），
+但签完之后外部依然访问不了 HTTPS，日志里会留下一条
+`tls-alpn-01 ... Timeout during connect (likely firewall problem)`。
+
 ### 方案 B：宿主机上已经有 Nginx / Caddy
 
 后端已经映射在 `127.0.0.1:8080`，直接反代过去即可。Nginx 大致长这样：
