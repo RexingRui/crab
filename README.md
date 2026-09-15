@@ -19,7 +19,7 @@
 
 ```bash
 cp .env.example .env
-# AUTH_SECRET 必填，至少 32 字符：
+# AUTH_SECRET 必填，至少 32 字符（模板里那行空值会被这行盖掉，同名键以后出现的为准）：
 echo "AUTH_SECRET=$(openssl rand -hex 32)" >> .env
 # 本地调试可以先用 dev（不校验 WECHAT_SECRET，并开启 CORS）
 sed -i 's/^ENV=prod/ENV=dev/' .env
