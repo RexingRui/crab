@@ -350,6 +350,9 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 
 ## 部署
 
+日常发版的流程（iPad 遥控 + 一台腾讯云 + GitHub Actions）单独写在
+[`mini-deploy.md`](mini-deploy.md)，本节是首次部署的细节。
+
 ```bash
 make build
 sudo mkdir -p /opt/crab-order/{bin,data,scripts}
