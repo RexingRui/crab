@@ -121,27 +121,56 @@ Actions →「小程序上传」→ Run workflow → `action` 选 **preview** �
 | 打了标签但 Actions 没触发 | 标签没 push 上去（`git push origin mp-v0.1.1`），或名字不匹配 `mp-v*` |
 | 页面空白、只有顶部一条提示 | 进了只读演示模式：服务端 `.env` 的 `ADMIN_OPENIDS` 里没有你的 openid。提审前务必先填 |
 
-## 想保留 IP 白名单
+## IP 白名单怎么选
 
-把一台固定公网 IP 的机器（比如你的腾讯云）注册成 GitHub 的 self-hosted runner：
+上传密钥页面的 IP 白名单，和上传从哪儿发出是一件事，三选一：
+
+| 从哪儿传 | 白名单 | 代价 |
+| --- | --- | --- |
+| GitHub 托管 runner（打 tag 自动发，默认） | **必须关掉** | 出口 IP 不固定，开着必然 403 |
+| 服务器上手动传 | 可以留，填服务器公网 IP | 每次发版都要 SSH，iPad 上多两步 |
+| 服务器当 self-hosted runner | 可以留，填同一个 IP | 服务器常驻 runner 进程，构建吃它的 CPU |
+
+只有第三种能同时拿到「打 tag 自动发」和「白名单不关」。做法是
+把这台固定公网 IP 的机器注册成 GitHub 的 self-hosted runner：
 Settings → Actions → Runners → New self-hosted runner，按页面指引装好（机器上要有 Node 20），
 再把 `.github/workflows/miniprogram-deploy.yml` 里的 `runs-on: ubuntu-latest` 改成
 `runs-on: self-hosted`。之后上传请求从这台机器的固定 IP 发出，白名单填它即可。
 代价是这台机器要常驻一个 runner 进程，构建时也吃它的 CPU 和内存。
 
-## 不用 CI，手动传
+## 在服务器上手动传
 
-没有 CI 或想在电脑上直接传时（iPad 上做不了，这里备个案）：
+首次上线时 CI 的 Secret 多半还没配好，直接在腾讯云上传一次最省事。
+iPad 上做不了（微信开发者工具只有 Mac / Windows 版，Taro 构建也需要 Node），
+但 SSH 上服务器就能跑 —— `miniprogram-ci` 是官方 npm 包，Linux 上正常工作。
+
+服务器上要有 **Node ≥ 18**（Taro 4 的要求，建议 20）。把上传密钥传到
+`miniprogram/` 目录下，然后：
 
 ```bash
+cd ~/app/crab            # 换成你的代码目录
+git pull origin main     # 确保是带了真实 appid 和正式域名的版本
 cd miniprogram
-cp .env.example .env            # 只需填 WX_PRIVATE_KEY_PATH，appid 和域名仓库里已有
-set -a && . ./.env && set +a
-npm install
+npm ci                   # 有 package-lock，用 ci 比 install 稳
 npm run build:weapp
-npm run ci:preview              # 出预览码 dist/preview.jpg
-npm run ci:upload               # 传开发版
+
+export WX_PRIVATE_KEY_PATH=./private.wx16ca0ed61d257288.key
+npm run ci:upload -- --version 0.1.0 --desc "首次上线"
 ```
+
+`appid`、域名、上传范围都已经在仓库里配好，命令行只需要给密钥和版本号。
+传完去后台「版本管理 → 开发版本」应该能看到这个版本。
+
+想直接用官方 CLI 也可以，等价写法是：
+
+```bash
+npx miniprogram-ci upload --pp ./dist --pkp ./private.<appid>.key \
+  --appid <appid> --uv 0.1.0 --ud "首次上线"
+```
+
+两点差别：`--pp` 要指到 `./dist`（Taro 会把 `project.config.json` 拷进去并把
+`miniprogramRoot` 改写成 `./`），而 `npm run ci:upload` 指的是 `miniprogram/` 本身；
+另外封装脚本会检查 `dist/` 在不在、是不是比 `src/` 旧，少一类「传了旧产物还以为发出去了」的事故。
 
 仓库根目录也有 `make mp-preview` / `make mp-upload`，会自动先构建。
 脚本是 `miniprogram/scripts/mp-ci.js`，用的是微信官方的
