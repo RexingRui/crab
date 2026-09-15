@@ -139,6 +139,20 @@ echo "AUTH_SECRET=$(openssl rand -hex 32)" >> .env
 vi .env     # 填 WECHAT_APPID / WECHAT_SECRET；国内机器建议 GOPROXY=https://goproxy.cn,direct
 ```
 
+私有仓库要让服务器能 `git fetch`（第 7 节的一键更新依赖它）。用**只读部署密钥**，
+别把个人 PAT 扔在生产机上：
+
+```bash
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/crab_deploy    # 公钥填到 GitHub 仓库
+# Settings → Deploy keys → Add deploy key，不要勾 Allow write access
+cat >> ~/.ssh/config <<'CONF'
+Host github.com
+    IdentityFile ~/.ssh/crab_deploy
+CONF
+git remote set-url origin git@github.com:<你>/<仓库>.git
+git fetch origin main                                 # 验证一下
+```
+
 `.env` 里这几项 Docker 部署时不用管，compose 会强制覆盖成容器里的值：
 
 - `HTTP_ADDR` → `:8080`（容器里必须监听 `0.0.0.0`，写成 `127.0.0.1` 外面就连不上）
