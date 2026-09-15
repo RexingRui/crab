@@ -1,0 +1,107 @@
+# 小程序上传：构建 Taro 产物后用微信官方 miniprogram-ci 传到微信后台。
+#
+# 需要在仓库配置：
+#   Secrets  WX_PRIVATE_KEY    小程序代码上传密钥（private.*.key 全文）—— 必需
+#            WX_APPID          小程序 AppID —— 可选，留空则取 project.config.json 里的
+#   Variables TARO_APP_API_BASE_URL / TARO_APP_TRACK_URL —— 可选，留空则用
+#             src/utils/config.js 里的正式域名；只在指向测试环境时才配
+#
+# 注意：上传密钥页面的 IP 白名单必须关掉，GitHub 托管 runner 的出口 IP 不固定。
+#      要保留白名单就换自建 runner，把它的固定 IP 填进去。
+name: 小程序上传
+
+on:
+  push:
+    tags:
+      - 'mp-v*'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 上传体验版（upload）还是只生成预览码（preview）
+        type: choice
+        options: [upload, preview]
+        default: upload
+      version:
+        description: 版本号，如 0.1.1；留空则用 miniprogram/package.json 的 version
+        type: string
+        required: false
+      desc:
+        description: 版本备注，留空则用「版本号 @ 提交号」
+        type: string
+        required: false
+      robot:
+        description: CI 机器人编号 1-30，不同用途分开占号便于在后台区分
+        type: string
+        default: '1'
+
+concurrency:
+  group: miniprogram-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: miniprogram
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: miniprogram/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 跑单测
+        run: npm test
+
+      # 手动输入一律走 env，不要拼进 shell 命令里
+      - name: 解析版本号与动作
+        id: meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_ACTION: ${{ inputs.action }}
+        run: |
+          if [ -n "${INPUT_VERSION}" ]; then
+            version="${INPUT_VERSION}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#mp-v}"
+          else
+            version="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "action=${INPUT_ACTION:-upload}" >> "$GITHUB_OUTPUT"
+          echo "本次版本号：${version}"
+
+      - name: 构建 weapp 产物
+        env:
+          TARO_APP_API_BASE_URL: ${{ vars.TARO_APP_API_BASE_URL }}
+          TARO_APP_TRACK_URL: ${{ vars.TARO_APP_TRACK_URL }}
+          MP_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if [ -z "${TARO_APP_API_BASE_URL}" ]; then
+            echo "::notice::没配 TARO_APP_API_BASE_URL，用 src/utils/config.js 里的正式域名"
+          fi
+          npm run build:weapp
+
+      - name: 上传 / 预览
+        env:
+          WX_APPID: ${{ secrets.WX_APPID }}
+          WX_PRIVATE_KEY: ${{ secrets.WX_PRIVATE_KEY }}
+          MP_VERSION: ${{ steps.meta.outputs.version }}
+          MP_DESC: ${{ inputs.desc }}
+          WX_CI_ROBOT: ${{ inputs.robot || '1' }}
+          MP_ACTION: ${{ steps.meta.outputs.action }}
+        run: node scripts/mp-ci.js "${MP_ACTION}"
+
+      - name: 留存预览二维码
+        if: steps.meta.outputs.action == 'preview'
+        uses: actions/upload-artifact@v4
+        with:
+          name: miniprogram-preview-qrcode
+          path: miniprogram/dist/preview.jpg
+          if-no-files-found: warn

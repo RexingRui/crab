@@ -1,5 +1,6 @@
 .PHONY: build run test test-race cover fmt vet tidy clean \
-	docker-init docker-build docker-up docker-down docker-restart docker-logs docker-ps docker-backup deploy
+	docker-init docker-build docker-up docker-down docker-restart docker-logs docker-ps docker-backup deploy \
+	mp-build mp-preview mp-upload
 
 BIN := bin/crab-server
 
@@ -62,3 +63,14 @@ docker-backup:
 # 线上更新：备份 → 拉代码 → 构建 → 滚动替换 → /healthz 自检，不过就自动回滚
 deploy:
 	./scripts/deploy.sh
+
+# ---------- 小程序（miniprogram/，详见 mini-deploy.md）----------
+
+mp-build:
+	cd miniprogram && npm run build:weapp
+
+mp-preview: mp-build
+	cd miniprogram && npm run ci:preview
+
+mp-upload: mp-build
+	cd miniprogram && npm run ci:upload
