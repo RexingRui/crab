@@ -344,6 +344,32 @@ npm test                 # 地址解析与金额换算的单测
 
 ## 部署
 
+两种方式，选一个。容器化见 **[deploy/DOCKER.md](deploy/DOCKER.md)**（Ubuntu 24.04 实操步骤、
+HTTPS、备份、升级、常见问题都在里面），最短路径：
+
+```bash
+cp .env.example .env
+echo "AUTH_SECRET=$(openssl rand -hex 32)" >> .env   # 再填 WECHAT_APPID / WECHAT_SECRET
+sudo make docker-init                                # 建 data/ backup/ 并 chown 给容器里的 uid 10001
+docker compose up -d --build
+curl localhost:8080/healthz
+
+# 顺手让容器里的 Caddy 也把 HTTPS 和买家查单页办了（需先在 .env 里配 CRAB_DOMAIN）
+docker compose --profile proxy up -d
+```
+
+容器里 `HTTP_ADDR` 与 `DB_PATH` 由 compose 强制覆盖成 `:8080` 和 `/data/crab.db`，
+数据库落在宿主机的 `./data/`，容器重建不丢数据。改完 `.env` 要用 `docker compose up -d`
+（`restart` 不重新读环境变量）。
+
+后续更新一条命令（备份 → 拉代码 → 构建 → 滚动替换 → `/healthz` 自检，不过则自动回滚代码与镜像）：
+
+```bash
+ssh <服务器> 'cd /opt/crab-order && ./scripts/deploy.sh'
+```
+
+裸机 + systemd：
+
 ```bash
 make build
 sudo mkdir -p /opt/crab-order/{bin,data,scripts}
@@ -370,7 +396,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now crab-order
   }
   ```
 - **小程序**：微信开发者工具里上传代码、提交审核，与服务端部署无关。
-- **备份**：`scripts/backup.sh` 用 `sqlite3 .backup` 做热备（WAL 模式下**不要直接 cp**，可能拷到不一致的状态），保留最近 30 天。建议 crontab 每天凌晨跑一次：
+- **备份**：`scripts/backup.sh` 用 `sqlite3 .backup` 做热备（WAL 模式下**不要直接 cp**，可能拷到不一致的状态），保留最近 30 天。Docker 部署走 `scripts/docker-backup.sh`（它在容器里调同一个脚本）。建议 crontab 每天凌晨跑一次：
 
   ```cron
   0 3 * * * /opt/crab-order/scripts/backup.sh >> /var/log/crab-backup.log 2>&1

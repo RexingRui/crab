@@ -1,0 +1,33 @@
+# 容器化 Caddy 的配置，配合 docker-compose.yml 的 proxy profile 使用：
+#   docker compose --profile proxy up -d
+#
+# 域名从环境变量 CRAB_DOMAIN 取（写在 .env 里）。首次启动会自动申请证书，
+# 前提是该域名已解析到本机、安全组放通 80/443，且（国内主机）域名已备案。
+
+{
+	# 想收到证书过期提醒就把下面这行的注释去掉并填自己的邮箱
+	# email you@example.com
+}
+
+{$CRAB_DOMAIN} {
+	encode zstd gzip
+
+	# 后端 API。容器间用服务名 api 通信，不经过宿主机端口。
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	# 买家免登录查单页：单个静态 HTML，/t?no=xxx 也要命中，所以用 /t* 并重写。
+	handle /t* {
+		header X-Robots-Tag noindex
+		rewrite * /index.html
+		file_server {
+			root /srv/track
+		}
+	}
+
+	# 其余路径不对外暴露任何东西（/healthz 也不放出去，容器自己会自检）
+	handle {
+		respond "Not Found" 404
+	}
+}

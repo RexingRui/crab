@@ -1,5 +1,6 @@
-# 运行时数据（SQLite 数据库与 WAL 文件）
+# 运行时数据（SQLite 数据库与 WAL 文件）与备份
 /data/
+/backup/
 *.db
 *.db-wal
 *.db-shm
