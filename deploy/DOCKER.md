@@ -12,6 +12,82 @@
 | `deploy/Caddyfile` | 容器化 Caddy 的配置：`/api` 反代后端、`/t` 托管买家查单页 |
 | `scripts/docker-backup.sh` | 宿主机 crontab 调用，在容器里做 SQLite 热备份 |
 
+## 腾讯云轻量应用服务器
+
+轻量云和普通 CVM 有几处不一样，装之前先过一遍。
+
+### 防火墙在控制台，不在机器里
+
+轻量云的「防火墙」是云平台层的规则（控制台 → 实例 → 防火墙），默认只放通 22 之类的少数端口。
+用容器化 Caddy 就加 TCP `80` 和 `443`（想启用 HTTP/3 再加 UDP `443`）。
+
+注意 **Docker 发布端口会直接写 iptables，绕过机器里的 ufw**，机器内的 ufw 规则基本不作数，
+控制台那道防火墙才是真正的闸门。这也正是 compose 里后端只绑 `127.0.0.1:8080` 的原因：
+哪怕控制台不小心放通了 8080，公网也连不到后端。
+
+### 基础镜像拉不动就配腾讯云内网镜像源
+
+`golang` / `alpine` / `caddy` 这些基础镜像从 Docker Hub 直接拉，国内经常超时。写 `/etc/docker/daemon.json`：
+
+```json
+{
+  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"],
+  "log-driver": "json-file",
+  "log-opts": {"max-size": "10m", "max-file": "3"}
+}
+```
+
+```bash
+sudo systemctl restart docker
+docker info | grep -A2 "Registry Mirrors"
+```
+
+这个地址是腾讯云的内网镜像源，只有腾讯云的机器能访问，走内网不占公网流量包。
+
+### Go 依赖默认已经走国内代理
+
+`.env.example` 里默认 `GOPROXY=https://goproxy.cn,direct`，轻量云上不用改。
+
+### 内存：2核2G 够用但没余量，1G 套餐要加 swap
+
+`modernc.org/sqlite` 依赖的 `modernc.org/libc` 是个大包，编译比较吃内存——
+实测 4 并发编译峰值约 **640MB**（并发数跟 CPU 核数走，2 核会低一些），再加上 Docker 自己的开销。
+轻量云默认一般没有 swap，1G 内存的套餐容易编译到一半被 OOM 杀掉。先看一眼，没有就加 2G：
+
+```bash
+free -h
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+实在不想在服务器上编译，就在本地构建好传上去（注意本地要和服务器同架构，轻量云基本都是 amd64）：
+
+```bash
+# 本地
+docker build -t crab-order:latest . && docker save crab-order:latest | gzip > crab.tar.gz
+scp crab.tar.gz root@<服务器IP>:/opt/crab-order/
+# 服务器
+gunzip -c crab.tar.gz | docker load && docker compose up -d      # 不加 --build
+```
+
+只有依赖（`go.mod` / `go.sum`）变了才会重新下载依赖，平时改代码的增量构建很快。
+
+### 域名必须备案
+
+微信小程序的 request 合法域名只认已备案的域名；未备案的域名解析到国内地域的机器上，
+80/443 的访问也会被拦截。轻量云控制台可以直接申请备案服务码（免费），一般十来天。
+
+备案下来之前可以先这样自测：机器上 `curl localhost:8080/healthz` 验证后端，
+小程序侧用开发者工具勾「不校验合法域名」连 IP 调试。**别为了图快把 `ENV` 改成 `dev` 长期跑**——
+dev 不校验 `WECHAT_SECRET` 还开 CORS，只适合本地。
+
+### 备份：快照不能替代数据库热备
+
+轻量云的定时快照是**磁盘级**的，SQLite 开着 WAL 时可能快照到不一致的状态，
+只能当整机兜底，不能替代下面第 6 节的 `scripts/docker-backup.sh` 热备。两个都做，
+再把 `backup/` 定期同步到 COS 或另一台机器；同地域走 COS 内网域名不占公网流量包。
+
 ## 0. 前置检查
 
 ```bash
@@ -24,8 +100,14 @@ Ubuntu 24.04 上如果 `docker compose` 不存在：
 sudo apt-get update && sudo apt-get install -y docker-compose-plugin
 ```
 
-云控制台的安全组要放通：用容器化 Caddy 就放 `80` + `443`，用宿主机已有的反代就按它的来。
-**后端自己不对公网开端口**（只绑 `127.0.0.1:8080`）。
+`docker` 要 sudo 才能跑的话，把自己加进 docker 组（重新登录生效）：
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+云控制台的防火墙 / 安全组要放通：用容器化 Caddy 就放 `80` + `443`，用宿主机已有的反代就按它的来。
+**后端自己不对公网开端口**（只绑 `127.0.0.1:8080`）。轻量云的防火墙位置见上一节。
 
 ## 1. 放代码与写配置
 
@@ -170,10 +252,12 @@ docker image prune -f               # 清理旧镜像层
 镜像里装了 `tzdata` 并设了 `TZ=Asia/Shanghai`，正常不会有。真出现了看日志里有没有
 「时区加载失败，退回固定 +08:00」——退回的也是 +08:00，业务时间不会错。
 
-**`docker compose build` 卡在下载 Go 依赖**
-`.env` 里设 `GOPROXY=https://goproxy.cn,direct` 后重新 build。
-拉不到 `golang` / `alpine` 基础镜像则是 Docker Hub 访问问题，配个镜像加速器
-（`/etc/docker/daemon.json` 的 `registry-mirrors`）再 `sudo systemctl restart docker`。
+**`docker compose build` 卡在下载 Go 依赖 / 拉不到基础镜像**
+`GOPROXY` 默认已经是 `https://goproxy.cn,direct`。拉不到 `golang` / `alpine` 基础镜像
+是 Docker Hub 的访问问题，配镜像加速器，见上面「腾讯云轻量应用服务器 · 基础镜像拉不动」。
+
+**构建过程中 SSH 断开 / 容器被杀，`dmesg` 里有 `Out of memory`**
+小内存套餐编译不动，加 swap 或改成本地构建后 `docker load`，见上面「腾讯云轻量应用服务器 · 内存」。
 
 **磁盘被日志吃满**
 compose 里已经限制了 `json-file` 每个容器最多 `10m × 5`。此外 SQLite 的 `-wal` 文件

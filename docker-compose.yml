@@ -12,8 +12,8 @@ services:
     build:
       context: .
       args:
-        # 国内机器可在 .env 里写 GOPROXY=https://goproxy.cn,direct
-        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        # 默认国内代理，海外机器可在 .env 里改成 https://proxy.golang.org,direct
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
     image: crab-order:latest
     container_name: crab-api
     restart: unless-stopped

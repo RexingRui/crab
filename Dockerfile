@@ -6,8 +6,9 @@
 # ---------- 构建阶段 ----------
 FROM golang:1.24-alpine AS builder
 
-# 国内服务器拉依赖慢或超时，换成：--build-arg GOPROXY=https://goproxy.cn,direct
-ARG GOPROXY=https://proxy.golang.org,direct
+# 默认走国内代理（这项目的服务器基本都在国内）。海外机器可以：
+#   --build-arg GOPROXY=https://proxy.golang.org,direct
+ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY} \
     CGO_ENABLED=0 \
     GOFLAGS=-mod=readonly
