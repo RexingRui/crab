@@ -137,7 +137,13 @@ cd /opt/crab-order
 cp .env.example .env
 echo "AUTH_SECRET=$(openssl rand -hex 32)" >> .env
 vi .env     # 填 WECHAT_APPID / WECHAT_SECRET；国内机器建议 GOPROXY=https://goproxy.cn,direct
+
+# 确认一眼：AUTH_SECRET 是 64 位十六进制、WECHAT_SECRET 非空
+grep -nE '^(ENV|AUTH_SECRET|WECHAT_APPID|WECHAT_SECRET)=' .env
 ```
+
+> 模板里本来有一行空的 `AUTH_SECRET=`，追加在末尾的那行会盖掉它（同名键以后出现的为准）。
+> 用 `sed -i "s|^AUTH_SECRET=.*|AUTH_SECRET=$(openssl rand -hex 32)|" .env` 原地替换也一样。
 
 私有仓库要让服务器能 `git fetch`（第 7 节的一键更新依赖它）。用**只读部署密钥**，
 别把个人 PAT 扔在生产机上：
@@ -327,7 +333,8 @@ docker image prune -f
 ## 常见问题
 
 **容器反复重启，日志说 `AUTH_SECRET 必须配置，且至少 32 个字符`**
-`.env` 里没填或短了，或者行尾写了注释。改完 `docker compose up -d`。
+`.env` 里没填、短于 32 字符，或者行尾写了注释。`grep -n '^AUTH_SECRET' .env` 看一眼，
+改完 `docker compose up -d`。
 
 **日志说 `ENV=prod 时必须配置 WECHAT_SECRET`**
 生产必须填小程序密钥；只想本地试跑可以临时 `ENV=dev`（不校验密钥并开启 CORS，别用于线上）。

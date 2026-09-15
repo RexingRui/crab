@@ -126,6 +126,35 @@ PUBLIC_RATE_LIMIT=5
 	}
 }
 
+// README 与 deploy/DOCKER.md 都教人 `cp .env.example .env` 之后再
+// `echo "AUTH_SECRET=$(openssl rand -hex 32)" >> .env`，而模板里本来就有一行空的
+// AUTH_SECRET=。文件内重复键必须以后出现的为准，否则照文档操作起不来。
+func TestLoadDotEnvLastDuplicateWins(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	content := `ENV=dev
+AUTH_SECRET=
+WECHAT_SECRET=
+LOG_LEVEL=info
+AUTH_SECRET=0123456789abcdef0123456789abcdef
+LOG_LEVEL=debug
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("追加在末尾的 AUTH_SECRET 应该生效: %v", err)
+	}
+	if c.AuthSecret != "0123456789abcdef0123456789abcdef" {
+		t.Errorf("AUTH_SECRET 取值不对: %q", c.AuthSecret)
+	}
+	if c.LogLevel != "debug" {
+		t.Errorf("重复键应以后出现的为准，实际 LOG_LEVEL=%q", c.LogLevel)
+	}
+}
+
 func TestLoadDotEnvMissingFileIsOK(t *testing.T) {
 	setEnv(t, validEnv())
 	if _, err := Load(filepath.Join(t.TempDir(), "nope.env")); err != nil {
