@@ -14,7 +14,7 @@
 
 ## 腾讯云轻量应用服务器
 
-轻量云和普通 CVM 有几处不一样，装之前先过一遍。
+轻量云和普通 CVM 有几处不一样，装之前先过一遍。下面的结论按 **2核4G** 的实例给。
 
 ### 防火墙在控制台，不在机器里
 
@@ -25,9 +25,22 @@
 控制台那道防火墙才是真正的闸门。这也正是 compose 里后端只绑 `127.0.0.1:8080` 的原因：
 哪怕控制台不小心放通了 8080，公网也连不到后端。
 
-### 基础镜像拉不动就配腾讯云内网镜像源
+### 镜像源：确认已生效
 
-`golang` / `alpine` / `caddy` 这些基础镜像从 Docker Hub 直接拉，国内经常超时。写 `/etc/docker/daemon.json`：
+`golang` / `alpine` / `caddy` 这些基础镜像从 Docker Hub 直接拉，国内经常超时，所以要走腾讯云内网源。
+已经配过的话跑一遍确认就行：
+
+```bash
+docker info | grep -A2 "Registry Mirrors"
+# Registry Mirrors:
+#  https://mirror.ccs.tencentyun.com/
+docker run --rm hello-world          # 能拉能跑，说明镜像源确实通了
+```
+
+<details>
+<summary>没配上的话（点开）</summary>
+
+写 `/etc/docker/daemon.json`：
 
 ```json
 {
@@ -39,29 +52,40 @@
 
 ```bash
 sudo systemctl restart docker
-docker info | grep -A2 "Registry Mirrors"
 ```
 
 这个地址是腾讯云的内网镜像源，只有腾讯云的机器能访问，走内网不占公网流量包。
+
+</details>
 
 ### Go 依赖默认已经走国内代理
 
 `.env.example` 里默认 `GOPROXY=https://goproxy.cn,direct`，轻量云上不用改。
 
-### 内存：2核2G 够用但没余量，1G 套餐要加 swap
+### 内存：2核4G 很宽裕，不用加 swap
 
-`modernc.org/sqlite` 依赖的 `modernc.org/libc` 是个大包，编译比较吃内存——
-实测 4 并发编译峰值约 **640MB**（并发数跟 CPU 核数走，2 核会低一些），再加上 Docker 自己的开销。
-轻量云默认一般没有 swap，1G 内存的套餐容易编译到一半被 OOM 杀掉。先看一眼，没有就加 2G：
+在服务器上直接 `docker compose build` 就行，不需要任何额外处理。跑一眼确认规格：
 
 ```bash
-free -h
+nproc && free -h        # 2 核 / available 3G 以上即可
+```
+
+几个参考数字：`modernc.org/sqlite` 依赖的 `modernc.org/libc` 是个大包，编译是整个流程里最吃内存的一步，
+实测 4 并发峰值约 **640MB**（并发数跟 CPU 核数走，2 核只会更低）；构建完成后后端常驻内存只有几十 MB。
+4G 内存下构建和运行同时进行都绰绰有余。
+
+<details>
+<summary>只有 1G / 2G 的小套餐才需要看这段（点开）</summary>
+
+轻量云默认没有 swap，1G 套餐容易编译到一半被 OOM 杀掉。加 2G swap：
+
+```bash
 sudo fallocate -l 2G /swapfile
 sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-实在不想在服务器上编译，就在本地构建好传上去（注意本地要和服务器同架构，轻量云基本都是 amd64）：
+或者干脆不在服务器上编译，本地构建好传上去（本地要和服务器同架构，轻量云基本都是 amd64）：
 
 ```bash
 # 本地
@@ -71,7 +95,7 @@ scp crab.tar.gz root@<服务器IP>:/opt/crab-order/
 gunzip -c crab.tar.gz | docker load && docker compose up -d      # 不加 --build
 ```
 
-只有依赖（`go.mod` / `go.sum`）变了才会重新下载依赖，平时改代码的增量构建很快。
+</details>
 
 ### 域名必须备案
 
@@ -90,21 +114,14 @@ dev 不校验 `WECHAT_SECRET` 还开 CORS，只适合本地。
 
 ## 0. 前置检查
 
-```bash
-docker version && docker compose version   # 需要 compose v2（docker-compose-plugin）
-```
-
-Ubuntu 24.04 上如果 `docker compose` 不存在：
+Docker 已经装好的话，这一步只是确认：
 
 ```bash
-sudo apt-get update && sudo apt-get install -y docker-compose-plugin
+docker version && docker compose version   # compose 需要 v2（docker-compose-plugin）
 ```
 
-`docker` 要 sudo 才能跑的话，把自己加进 docker 组（重新登录生效）：
-
-```bash
-sudo usermod -aG docker "$USER"
-```
+`docker compose` 不存在就 `sudo apt-get update && sudo apt-get install -y docker-compose-plugin`；
+`docker` 要 sudo 才能跑就 `sudo usermod -aG docker "$USER"`（重新登录生效）。
 
 云控制台的防火墙 / 安全组要放通：用容器化 Caddy 就放 `80` + `443`，用宿主机已有的反代就按它的来。
 **后端自己不对公网开端口**（只绑 `127.0.0.1:8080`）。轻量云的防火墙位置见上一节。
@@ -254,10 +271,11 @@ docker image prune -f               # 清理旧镜像层
 
 **`docker compose build` 卡在下载 Go 依赖 / 拉不到基础镜像**
 `GOPROXY` 默认已经是 `https://goproxy.cn,direct`。拉不到 `golang` / `alpine` 基础镜像
-是 Docker Hub 的访问问题，配镜像加速器，见上面「腾讯云轻量应用服务器 · 基础镜像拉不动」。
+是 Docker Hub 的访问问题，配镜像加速器，见上面「腾讯云轻量应用服务器 · 镜像源」。
 
 **构建过程中 SSH 断开 / 容器被杀，`dmesg` 里有 `Out of memory`**
-小内存套餐编译不动，加 swap 或改成本地构建后 `docker load`，见上面「腾讯云轻量应用服务器 · 内存」。
+2核4G 上不该出现。小内存套餐才需要加 swap 或改成本地构建后 `docker load`，
+见上面「腾讯云轻量应用服务器 · 内存」。
 
 **磁盘被日志吃满**
 compose 里已经限制了 `json-file` 每个容器最多 `10m × 5`。此外 SQLite 的 `-wal` 文件
