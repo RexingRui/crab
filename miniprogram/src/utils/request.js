@@ -46,7 +46,12 @@ function raw({ url, method = 'GET', data, header, skipAuth }) {
     if (body.code === 0) return body.data
     throw { code: body.code, msg: body.msg || '请求失败', data: body.data }
   }, (err) => {
-    const timeout = err && String(err.errMsg || '').includes('timeout')
+    const errMsg = (err && err.errMsg) || ''
+    // 用户看到的是笼统的「网络不通」，但排查时得知道微信到底报的什么：
+    // 域名没进白名单是 request:fail url not in domain list，DNS / 证书问题又是另一套。
+    // 手机上打开调试，这行会出现在 vConsole 的 Log 面板里。
+    console.error('[request] 请求失败', getBaseUrl() + url, errMsg)
+    const timeout = errMsg.includes('timeout')
     throw { code: -1, msg: timeout ? '网络超时' : '网络不通，检查一下信号' }
   })
 }
