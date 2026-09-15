@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  backend:
+    name: 后端测试与镜像构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          out="$(gofmt -s -l .)"
+          if [ -n "$out" ]; then echo "以下文件需要 gofmt -s -w："; echo "$out"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test -race
+        run: go test -race ./...
+
+      # 只构建不推送：确认 Dockerfile 没坏，部署时服务器上不会才发现
+      - name: docker build
+        run: |
+          docker build \
+            --build-arg GOPROXY=https://proxy.golang.org,direct \
+            -t crab-order:ci .
