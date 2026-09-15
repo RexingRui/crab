@@ -136,7 +136,10 @@ func splitAndTrim(s string) []string {
 }
 
 // loadDotEnv 解析简易 .env 文件；文件不存在不是错误。
-// 已经存在的环境变量不会被覆盖，方便 systemd / docker 注入生产配置。
+//
+// 进程启动时就存在的环境变量不会被覆盖，方便 systemd / docker 注入生产配置。
+// 文件内部重复的键以**后出现的为准**：照文档 `cp .env.example .env` 再往末尾
+// 追加一行 AUTH_SECRET=xxx，就该盖掉模板里那行空值。
 func loadDotEnv(path string) error {
 	if path == "" {
 		return nil
@@ -149,6 +152,15 @@ func loadDotEnv(path string) error {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
+
+	// 只有「进入本函数之前就存在」的变量才压过文件。若直接拿 os.LookupEnv 判断，
+	// 本函数自己 Setenv 写进去的值会把文件里后出现的同名键挡掉。
+	preset := make(map[string]struct{})
+	for _, kv := range os.Environ() {
+		if k, _, ok := strings.Cut(kv, "="); ok {
+			preset[k] = struct{}{}
+		}
+	}
 
 	sc := bufio.NewScanner(f)
 	for line := 1; sc.Scan(); line++ {
@@ -168,7 +180,7 @@ func loadDotEnv(path string) error {
 			value[0] == '\'' && value[len(value)-1] == '\'') {
 			value = value[1 : len(value)-1]
 		}
-		if _, exists := os.LookupEnv(key); exists {
+		if _, exists := preset[key]; exists {
 			continue
 		}
 		if err := os.Setenv(key, value); err != nil {
