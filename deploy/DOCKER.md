@@ -9,7 +9,7 @@
 |---|---|
 | `Dockerfile` | 多阶段构建，运行阶段 alpine + 静态二进制 + sqlite3 |
 | `docker-compose.yml` | `api` 服务；可选的 `caddy` 服务（`proxy` profile） |
-| `deploy/Caddyfile` | 容器化 Caddy 的配置：`/api` 反代后端、`/t` 托管买家查单页 |
+| `deploy/Caddyfile` | 容器化 Caddy 的配置：`/api` 反代后端、`/t` 托管买家查单页、`/r` 托管买家登记页 |
 | `scripts/docker-backup.sh` | 宿主机 crontab 调用，在容器里做 SQLite 热备份 |
 | `scripts/deploy.sh` | 更新线上：备份 → 拉代码 → 构建 → 替换 → 自检，不过则自动回滚 |
 
@@ -215,8 +215,9 @@ echo "CRAB_DOMAIN=你的域名" >> .env     # 域名必须已解析到本机；�
 docker compose --profile proxy up -d
 ```
 
-它做三件事：`/api/*` 反代到 `api:8080`、`/t*` 用 `web/track/index.html` 托管买家查单页
-（带 `X-Robots-Tag: noindex`）、其余路径一律 404。证书存在 `caddy-data` 卷里，
+它做四件事：`/api/*` 反代到 `api:8080`、`/t*` 用 `web/track/index.html` 托管买家查单页、
+`/r*` 用 `web/register/index.html` 托管买家自助登记页（两个页面都带 `X-Robots-Tag: noindex`）、
+其余路径一律 404。证书存在 `caddy-data` 卷里，
 **别随手 `docker compose down -v`**，删了要重新申请，会撞 ACME 频率限制。
 
 ### 方案 B：宿主机上已经有 Nginx / Caddy
@@ -241,10 +242,15 @@ server {
         add_header X-Robots-Tag noindex;
         alias /opt/crab-order/web/track/index.html;
     }
+
+    location /r {
+        add_header X-Robots-Tag noindex;
+        alias /opt/crab-order/web/register/index.html;
+    }
 }
 ```
 
-买家查单接口按 IP 限流，所以 `X-Real-IP` / `X-Forwarded-For` 一定要传，
+买家查单与登记接口都按 IP 限流，所以 `X-Real-IP` / `X-Forwarded-For` 一定要传，
 不然所有买家会共用同一个限流桶。
 
 ## 6. 备份

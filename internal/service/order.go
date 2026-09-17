@@ -61,6 +61,9 @@ type ItemInput struct {
 	Unit      model.Unit
 	Quantity  int
 	UnitPrice int64
+	// PackSize 一盒几只，只用来数「这单一共多少只」，不落库——
+	// 明细存的是快照，盒里装什么已经写在 SpecLabel 里了。
+	PackSize int
 }
 
 type CreateOrderInput struct {
@@ -75,7 +78,9 @@ type CreateOrderInput struct {
 	Discount       int64
 	ExpectShipDate string
 	Remark         string
-	Operator       string
+	// Source 订单来源，空串按 manual 处理。买家自助登记走 CreateRegistration 传 web。
+	Source   model.Source
+	Operator string
 }
 
 type UpdateOrderInput struct {
@@ -223,6 +228,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, in CreateOrderInput) (*m
 		PayStatus:      model.PayUnpaid,
 		ExpectShipDate: in.ExpectShipDate,
 		Remark:         in.Remark,
+		Source:         in.Source,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 		Items:          items,

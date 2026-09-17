@@ -1,0 +1,24 @@
+@use '../../styles-tokens.scss' as *;
+
+/* 录单页顶上的次要入口。次要就要长得像次要：描边、不填色，
+ * 别和下面「记一笔」的主按钮抢。 */
+.record__link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 24px 24px 0;
+  padding: 20px 24px;
+  border: 1px solid $line;
+  border-radius: $radius-btn;
+  background: $card;
+}
+
+.record__link-text {
+  font-size: 26px;
+  color: $shell;
+}
+
+.record__link-arrow {
+  font-size: 26px;
+  color: $muted;
+}

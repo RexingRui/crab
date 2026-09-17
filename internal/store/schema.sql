@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS orders (
     settled_time      INTEGER,                          -- 付清时间
 
     remark            TEXT    NOT NULL DEFAULT '',
+    source            TEXT    NOT NULL DEFAULT 'manual',  -- manual=卖家录入 / web=买家自助登记
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     deleted_at        INTEGER
@@ -98,7 +99,8 @@ CREATE TABLE IF NOT EXISTS specs (
     spec_gram   INTEGER NOT NULL,
     spec_label  TEXT    NOT NULL,
     unit        TEXT    NOT NULL DEFAULT 'piece',
-    unit_price  INTEGER NOT NULL,                       -- 当季参考价
+    unit_price  INTEGER NOT NULL,                       -- 当季参考价（按只就是只价，按盒就是整盒价）
+    pack_size   INTEGER NOT NULL DEFAULT 0,             -- 一盒几只；0 表示不是套餐
     enabled     INTEGER NOT NULL DEFAULT 1,
     sort_no     INTEGER NOT NULL DEFAULT 0,
     updated_at  INTEGER NOT NULL

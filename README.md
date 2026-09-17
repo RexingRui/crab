@@ -1,12 +1,14 @@
 # 大闸蟹订单管理
 
-个人大闸蟹卖家的订单管理：卖家在微信小程序里录单、查单、标记发货与收款，买家用免登录链接自助查物流。
+个人大闸蟹卖家的订单管理：卖家在微信小程序里录单、查单、标记发货与收款；
+买家用免登录链接自助查物流，也可以用登记链接自己把收货信息填了。
 
 | 目录 | 是什么 |
 |---|---|
 | `cmd/` `internal/` | 后端，Go + SQLite，单文件二进制 |
 | `miniprogram/` | 小程序「蟹记」，Taro 4 + React |
 | `web/track/` | 买家查单页，单个静态 HTML |
+| `web/register/` | 买家自助登记页，单个静态 HTML |
 
 后端：
 
@@ -29,7 +31,8 @@ curl localhost:8080/healthz
 # {"code":0,"msg":"ok","data":{"status":"ok"}}
 ```
 
-首次启动会自动建表，并在 `specs` 表为空时写入 8 条当季参考价。
+首次启动会自动建表，并在 `specs` 表为空时写入当季价目表（4 档 8 只装套餐）。
+**已经跑起来的库不会被覆盖**——换价目表去小程序「设置」页，把旧的档停用、把新的加上。
 
 ### 构建与测试
 
@@ -64,8 +67,9 @@ internal/timex/     业务时区与时间格式
 3. **`goods_amount` / `payable_amount` 由服务端算**，忽略客户端传入值。
 4. **发货状态与收款状态互不约束**。熟客先发后付、预售先付后发都是正常业务，没有「未付款不能发货」这种校验。
 5. **明细里的 `spec_label` / `unit_price` 是快照**，不关联 `specs` 表。改价只影响新订单，历史订单金额不跟着变（有测试守着）。
-6. **所有多表写入都在一个 `BEGIN IMMEDIATE` 事务里**（`store.WithTx`）。
-7. **时间全走 `Asia/Shanghai`**，服务器时区可能是 UTC，业务时间一律经 `internal/timex`。
+6. **公开写接口绝不接受客户端传的单价**。卖家录单的 `unit_price` 是客户端给的（临时改价是正常操作），但买家自助登记只收 `spec_id + quantity`，单价由服务端回查 `specs` 填快照。照抄录单那条路径就等于买家自己定价（有测试守着）。
+7. **所有多表写入都在一个 `BEGIN IMMEDIATE` 事务里**（`store.WithTx`）。
+8. **时间全走 `Asia/Shanghai`**，服务器时区可能是 UTC，业务时间一律经 `internal/timex`。
 
 ## 配置
 
@@ -75,6 +79,9 @@ internal/timex/     业务时区与时间格式
 
 - `AUTH_SECRET` 为空或短于 32 字符 → 直接退出，不允许使用默认密钥
 - `ENV=prod` 且 `WECHAT_SECRET` 为空 → 直接退出
+- `PUBLIC_RATE_LIMIT` / `PUBLIC_WRITE_RATE_LIMIT` / `REG_LINK_TTL` 非正数 → 直接退出
+
+`AUTH_SECRET` 同时也是买家登记链接的签名密钥（换密钥会让已发出的登记链接全部失效）。
 
 ### 第一次部署怎么拿到 openid
 
@@ -108,7 +115,8 @@ Base URL `https://<domain>/api`，请求与响应均为 `application/json; chars
 | 42900 | 429 | 请求过于频繁 |
 | 50000 | 500 | 服务内部错误 |
 
-> 幂等冲突不会真的返回 40901：`request_id` 重复时直接返回**已存在的那笔订单**，`code = 0`，响应里多一个 `"idempotent": true`。小程序网络抖动重试既不会重复建单，也不会给用户报错。
+> 建单的幂等冲突不会真的返回 40901：`request_id` 重复时直接返回**已存在的那笔订单**，`code = 0`，响应里多一个 `"idempotent": true`。小程序网络抖动重试既不会重复建单，也不会给用户报错。
+> 唯一真的会返回 40901 的地方是买家自助登记撞上手机号查重，见下面的「买家自助登记」。
 
 ### curl 示例
 
@@ -156,6 +164,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 | 参数 | 说明 |
 |---|---|
 | `ship_status` / `pay_status` | 支持逗号分隔多值 |
+| `source` | `manual`（卖家录的）/ `web`（买家自助登记的） |
 | `keyword` | 模糊匹配单号 / 收货人 / 手机 / 微信昵称 / 微信备注 / 运单号 |
 | `expect_ship_date` | 精确匹配某天 |
 | `expect_ship_date_start` / `expect_ship_date_end` | 约定发货日区间 |
@@ -244,7 +253,12 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/stats/ship-plan?date=
 
 口径：`today.revenue` 是当天**实际收到的钱**（按 `payments.paid_at` 计，含退款负数）；`range.*` 按订单**创建时间**落在区间内统计；`pending.unpaid_amount` 不含已取消的订单。`ship-plan` 的 `date` 默认明天。
 
-**地址簿 / 规格价目表**
+**地址簿 / 价目表**
+
+价目表一档可以是**套餐**（按盒卖，`unit=box` + `pack_size>0`），也可以是**单规格**
+（按只/按斤卖，`pack_size=0`）。套餐的 `gender` 是 `mixed`、`unit_price` 是整盒价、
+`spec_gram` 是整盒克重；一盒里公母各几只不存在这张表里，由买家登记时自己定，
+价格不随比例变。
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/addresses?keyword=张&limit=20'
@@ -254,6 +268,9 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/specs?all=1'  # 连�
 
 curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
   -d '{"gender":"male","spec_gram":300,"spec_label":"6.0两","unit":"piece","unit_price":16800}'
+# 套餐档：整盒价 + 一盒几只
+curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
+  -d '{"gender":"mixed","spec_gram":1200,"spec_label":"8只装 母2.5两/公3.5两","unit":"box","unit_price":18900,"pack_size":8}'
 curl -X PUT localhost:8080/api/specs/3 -H "Authorization: Bearer $TOKEN" \
   -d '{"gender":"male","spec_gram":225,"spec_label":"4.5两","unit":"piece","unit_price":9500}'
 curl -X DELETE localhost:8080/api/specs/3 -H "Authorization: Bearer $TOKEN"   # 停用，不物理删
@@ -278,6 +295,75 @@ curl 'localhost:8080/api/public/orders?order_no=20260914-007&phone_tail=8000'
 
 强制「单号 + 手机号后 4 位」双因子匹配，任一不对都统一返回 `40400`（不区分「单号不存在」和「手机号不对」，避免被枚举）。返回数据脱敏：姓名只留姓、手机中间 4 位打码、地址只到区县级、不含金额与备注。按 IP 限流每分钟 20 次。
 
+**买家自助登记**
+
+卖家签一条链接发给买家，买家在浏览器里自己填收货信息，落成一笔 `source=web` 的待发货订单。
+
+```bash
+# 1) 卖家签链接（要登录）。remark 是先写好的备注名，买家改不了
+curl -X POST localhost:8080/api/reg-links \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"remark":"老张介绍"}'
+# {"code":0,"msg":"ok","data":{"token":"eyJqdGk...","path":"/r?t=eyJqdGk...","expires_at":"2026-09-24T10:30:00+08:00"}}
+
+# 2) 买家页拉规格与价格（免登录，只返回启用中的）
+curl localhost:8080/api/public/specs
+
+# 3) 买家提交（免登录，凭链接里的 token）
+curl -X POST localhost:8080/api/public/registrations \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "token": "eyJqdGk...",
+    "receiver_name": "李四",
+    "phone": "13900139001",
+    "address": "江苏省苏州市姑苏区平江路100号2单元501",
+    "wechat_nick": "四哥",
+    "items": [{"spec_id": 1, "quantity": 13, "male_count": 7}],
+    "expect_ship_date": "2026-09-20",
+    "remark": "工作日收不到，周末发"
+  }'
+```
+
+返回的是登记回执（单号、明细摘要、服务端算出来的应收），不是完整订单。
+
+几条设计上的选择：
+
+- **token 无状态**，用 `AUTH_SECRET` 签，服务端不存也撤不回，只能靠 `REG_LINK_TTL` 兜底。
+  签名前加了 `reg.` 域前缀，和登录 token 互不通用（有测试守着）。
+- **一条链接只落一单**：token 里的 `jti` 直接当建单幂等键（`request_id = "reg:<jti>"`），
+  撞 `uk_orders_request` 唯一索引。重复提交返回原来那笔单（`code 0` + `idempotent: true`），
+  不是错误，也不会重复建单。**不需要服务端记账，所以没有新表。**
+  幂等命中的回执里**姓名打码**——链接会被转发，拿到转发链接的人提交一次就能看到这张回执。
+- **单价只认 `specs` 表**：买家只传 `spec_id + quantity`（套餐再加一个 `male_count`），
+  `unit_price` / `freight_fee` / `discount` 传了也不看。运费与优惠留给卖家在小程序里补。
+- **买家填的是只数，不是盒数**。`quantity` 一律按只算，服务端拆成整盒 + 零头：
+  13 只 = 1 盒 + 散 5 只。买家不该为了用这个页面先自己算清楚凑不凑得满一盒。
+- **凑不满整盒的零头按散买价算**，散买价 = 整盒价摊到只后**向上取整到元**
+  （189 ÷ 8 = 23.625 → 24 元），随价目表一起下发（`loose_price`）。
+  取到元而不是到分，一来报价好说出口，二来天然保证整盒比散买划算
+  （8 只散买 192 > 整盒 189），不会出现凑不满盒反而更便宜。有测试守着这个方向。
+- **起订 5 只只管散买**（`service.RegMinCrabs`，随价目表下发 `min_loose`）。
+  零头不是 0 就必须 ≥ 5：9 只会被拒，并在提示里直接给出「改成 8 只或 13 只」。
+  整盒买多少都行。只卡买家这条路径——卖家给熟客记一只也是正常业务，录单接口不受限制。
+- **一档可能拆成两条明细**：整盒一条（`unit=box`，整盒价）、散只一条
+  （`unit=piece`，散买价，`spec_label` 带「散只」）。公母按比例分摊到两条，
+  整盒那份四舍五入，两条加起来等于买家填的公母数（有覆盖 n=5..40 全组合的测试）。
+- **公母比例只影响明细快照，不影响金额**。`male_count` 是这一档里公的只数，
+  不传就是一半一半（所以它在请求里是可空的——传 `0` 表示整档都要母的，和「没传」
+  不是一回事），越界返回 40001。比例写进 `spec_label`，形如
+  `8只装 母2.5两/公3.5两（公4母4）`，卖家照着配货就行。
+  **自由搭配**就是一次登记里混几档，各算各的。
+- **手机号一天内查重**：同号第二次提交返回 `40901`，提示「已经登记过了」。
+  提示里**不回单号**——链接可能被转发，不能让持链接的人拿任意手机号反查出别人的单号
+  （有了单号和手机号就能在查单页看到脱敏详情）。
+- 落库的 `expect_ship_date` 是买家**希望**的发货日，不能早于今天；卖家改单时可以覆盖。
+- 公开写接口单独限流，默认每 IP 每分钟 5 次（`PUBLIC_WRITE_RATE_LIMIT`），不和查单共用配额。
+
+卖家侧：列表支持 `?source=web` 筛出买家登记的单，CSV 导出多一列「来源」，
+订单卡片和详情页会标出来（灰字，不是彩色标签——它是出处，不是待办）。
+小程序的「选规格」与「设置」页都认套餐：页签按价目表里实际有的分组生成，
+全是套餐时不会摆两个空的「公 / 母」页签。
+
 ## 前端
 
 ### 小程序「蟹记」（`miniprogram/`）
@@ -299,6 +385,8 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 临时改，存本地。域名记得在小程序后台配成 request 合法域名。上传体验版见下面的「小程序上传」。
 
 页面：今天（要发的清单 + 汇总）、记一笔（录单）、全部（列表筛选）、详情、设置。
+「记一笔」顶上还有一条「让买家自己填 · 发条登记链接」：生成登记链接并复制成一段话，
+粘到微信发给买家。入口放在录单页而不是首页——它和录单是替代关系，摆一起才看得出是二选一。
 
 几条界面上的规矩：
 
@@ -348,6 +436,30 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 发给买家的链接形如 `https://<域名>/t?no=20260914-007`，小程序详情页的「发链接给买家」
 会把这段话复制到剪贴板。
 
+### 买家登记页（`web/register/index.html`）
+
+同样是单个静态 HTML，同一套色板与排版规矩，无构建步骤、无框架、无 CDN、无埋点。
+链接形如 `https://<域名>/r?t=<token>`，没有 `t=` 或 token 过期都直接给一句话，不显示表单。
+
+页面只做三件事：拉 `/api/public/specs` 列出当季价目、每档填「要几只」（填了就露出公母比例行，
+和一行说明这些只怎么拆怎么算钱）、收齐收货信息后提交。几个刻意的选择：
+
+- 只数用**输入框**而不是纯加减器：要 16 只不该点十六下。加减按钮留着做微调。
+- 每档下面实时显示拆法与小计（`1 盒 + 散 5 只　¥309.00`）；零头不够 5 只时这行标红，
+  并直接说「改成 8 只或 13 只」——只说「不行」等于让买家自己试。
+
+- 合计只是**货款预估**，不含运费，页面上明写「运费和最终费用等发出后确认」；
+  回执里显示的是**后端返回的 `payable_amount`**，不是页面自己加的那个数。
+- 比例默认一半一半，**没动过就不传 `male_count`**，让后端取默认值——两边的默认值是同一个，
+  不在前端复制一份。散买价与起订量同理，都是跟着价目表下发的，页面不写死数字。
+- 金额一律按「分」的整数算，分转元走整数运算，前端也不碰浮点。
+- 加减只改动过的那几个节点，不重建整个列表——重建会让刚点的按钮换一个 DOM 节点，
+  连点时焦点和触摸态都会丢。
+- 提交成功后表单整个换成回执，带单号、明细、货款和一条查单页链接。
+  刷新页面重新提交同一条链接会命中幂等，看到的还是同一笔单。
+
+两个页面共用一个域名，小程序里配在「设置」的那一项（`TARO_APP_TRACK_URL`）。
+
 ## 部署
 
 本节讲服务端。小程序发版是另一条线，见 [`mini-deploy.md`](mini-deploy.md)。
@@ -389,8 +501,9 @@ sudo systemctl daemon-reload && sudo systemctl enable --now crab-order
 ```
 
 - **HTTPS**：微信小程序强制要求 HTTPS 且域名需在小程序后台配置。生产由 Caddy 或 Nginx 反代并自动签证书，Go 服务只监听 `127.0.0.1:8080`（把 `HTTP_ADDR` 设成 `127.0.0.1:8080`）。
-- **买家查单页**：后端不托管静态文件，由反代把 `/t` 指到 `web/track/index.html`，
-  `/api` 反代到 Go。同源，不涉及 CORS。顺手给 `/t` 加一条 `X-Robots-Tag: noindex`。
+- **买家页**：后端不托管静态文件，由反代把 `/t` 指到 `web/track/index.html`、
+  `/r` 指到 `web/register/index.html`，`/api` 反代到 Go。同源，不涉及 CORS。
+  顺手给这两条都加上 `X-Robots-Tag: noindex`。
   Caddy 大致长这样：
 
   ```caddy
@@ -469,4 +582,7 @@ npm run ci:upload             # 传体验版
 
 ## 本期不含
 
-微信支付在线收款、商品库存管理、多商家/多店铺、快递面单打印对接、买家在线下单、消息推送/订阅消息。数据模型上给微信支付与订阅消息预留了字段。
+微信支付在线收款、商品库存管理、多商家/多店铺、快递面单打印对接、消息推送/订阅消息。数据模型上给微信支付与订阅消息预留了字段。
+
+买家侧只有「自助登记」——把收货信息和要什么规格填了，落成一笔待发货订单；
+价格确认、运费、收款全都还在卖家手上，线上付款这条线没有做。

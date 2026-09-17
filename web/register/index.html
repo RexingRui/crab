@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>蟹记 · 登记收货信息</title>
+<style>
+:root{
+  --shell:#2F4739;--shell-deep:#1C231E;--claw:#C8A227;--boiled:#D2542A;
+  --belly:#EFF2EE;--card:#FFF;--line:#DCE2DC;--muted:#6B7670;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--belly);color:var(--shell-deep);
+  font:16px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;padding:0 16px 48px;
+}
+.wrap{max-width:520px;margin:0 auto}
+.brand{text-align:center;padding:48px 0 8px;font-size:20px;font-weight:600;letter-spacing:.08em;color:var(--shell)}
+h1{font-size:17px;font-weight:400;color:var(--muted);text-align:center;margin:0 0 32px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:16px}
+.card h2{font-size:14px;font-weight:600;color:var(--shell);margin:0 0 16px;letter-spacing:.04em}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:8px}
+.opt{font-weight:400;color:var(--muted)}
+input,textarea{
+  font:inherit;color:inherit;background:var(--card);
+  border:1px solid var(--line);border-radius:12px;padding:12px 14px;width:100%;
+  letter-spacing:.02em;-webkit-appearance:none;appearance:none;
+}
+textarea{resize:vertical;min-height:76px;line-height:1.6}
+input:focus,textarea:focus{outline:none;border-color:var(--shell)}
+input[type=tel],input[type=date]{font-variant-numeric:tabular-nums}
+.gap{margin-top:20px}
+
+/* 一档一行：左边档名与整盒价，右边加减几盒。
+   数量与金额一律 tabular-nums，竖着能对齐扫读 */
+.pack{padding:14px 0;border-top:1px solid var(--line)}
+.pack:first-of-type{border-top:none;padding-top:0}
+.spec{display:flex;align-items:center;gap:12px}
+.spec .name{flex:1;min-width:0}
+.spec .t{font-size:15px}
+.spec .p{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:2px;white-space:nowrap}
+
+/* 拆分行：填了只数才出现，说清这些只怎么算钱 */
+.split{display:none;font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
+.split.on{display:block}
+.split .num{font-variant-numeric:tabular-nums}
+.split.bad{color:var(--boiled)}
+
+/* 比例行：填了只数才出现。公母总数固定，价格不跟着变。
+   加减器做小一号，免得和上面那个「几只」分不清主次 */
+.ratio{display:none;align-items:center;gap:10px;margin-top:12px}
+.ratio.on{display:flex}
+.ratio .lab{font-size:13px;color:var(--muted);flex:1;min-width:0}
+.ratio .lab b{font-weight:600;color:var(--shell-deep);font-variant-numeric:tabular-nums}
+.ratio .step button{width:26px;height:26px;font-size:15px;border-radius:7px}
+.ratio .step .n{width:28px;font-size:14px}
+.step{display:flex;align-items:center;gap:2px}
+.step button{
+  width:32px;height:32px;padding:0;margin:0;border-radius:8px;
+  border:1px solid var(--line);background:var(--card);color:var(--shell);
+  font-size:18px;line-height:1;font-weight:400;
+}
+.step button:disabled{opacity:.3}
+.step .n{
+  width:40px;text-align:center;font-variant-numeric:tabular-nums;font-size:16px;
+}
+/* 只数直接敲更快：要 16 只不该点十六下 */
+.step input.n{
+  font:inherit;font-size:16px;width:48px;padding:6px 0;border:1px solid var(--line);
+  border-radius:8px;background:var(--card);color:inherit;
+  text-align:center;font-variant-numeric:tabular-nums;-webkit-appearance:none;appearance:none;
+}
+.step input.n:focus{outline:none;border-color:var(--shell)}
+.step input.n::-webkit-outer-spin-button,
+.step input.n::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.step input.n{-moz-appearance:textfield}
+.step input.n.zero{color:var(--muted)}
+.step .n.zero{color:var(--muted)}
+.sum{
+  display:flex;justify-content:space-between;align-items:baseline;
+  margin-top:16px;padding-top:16px;border-top:1px solid var(--line);
+}
+.sum .k{font-size:13px;color:var(--muted)}
+.sum .cnt{font-variant-numeric:tabular-nums}
+.sum .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6}
+
+button.go{
+  font:inherit;font-weight:600;color:#fff;background:var(--shell);
+  border:none;border-radius:12px;padding:14px;width:100%;margin-top:8px;
+}
+button.go:disabled{opacity:.45}
+.err{color:var(--boiled);font-size:14px;margin-top:16px;text-align:center;min-height:20px}
+.foot{text-align:center;color:var(--muted);font-size:12px;margin-top:40px}
+
+/* 回执 */
+.done{display:none}
+.done.on{display:block}
+.form.off{display:none}
+.tick{width:44px;height:44px;border-radius:50%;background:var(--shell);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:22px;margin:4px auto 16px}
+.done .no{font-variant-numeric:tabular-nums;letter-spacing:.02em;font-size:20px;font-weight:600;text-align:center}
+.done .cap{text-align:center;color:var(--muted);font-size:13px;margin-top:6px}
+.kv{display:flex;justify-content:space-between;gap:16px;margin-top:12px;font-size:15px}
+.kv .k{color:var(--muted);font-size:14px;flex:none}
+.kv .v{text-align:right;font-variant-numeric:tabular-nums}
+.done .line{margin-top:20px;padding-top:16px;border-top:1px solid var(--line);font-size:14px;color:var(--muted);line-height:1.7}
+.done a{color:var(--shell)}
+.dead{text-align:center;color:var(--muted);font-size:15px;line-height:1.8;padding:8px 0}
+@media (prefers-reduced-motion:no-preference){.done.on{animation:in .2s ease-out}}
+@keyframes in{from{opacity:0}to{opacity:1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">蟹记</div>
+  <h1 id="sub">登记一下收货信息</h1>
+
+  <div class="form" id="form">
+    <div class="card" id="specCard">
+      <h2>要哪一档</h2>
+      <div id="specs"><div class="dead">正在取当季的价目…</div></div>
+      <div class="sum">
+        <span class="k">货款合计 <span class="cnt" id="count"></span></span>
+        <span class="v" id="total">¥0.00</span>
+      </div>
+      <div class="hint" id="hint">按当季价算的货款，不含运费。运费和最终费用等发出后确认。<br>
+      填要几只就行，公母自己配，凑得满整盒就按整盒价算。</div>
+    </div>
+
+    <div class="card">
+      <h2>收货信息</h2>
+      <label for="name">收货人</label>
+      <input id="name" maxlength="32" autocomplete="name" placeholder="怎么称呼">
+
+      <div class="gap">
+        <label for="phone">手机号</label>
+        <input id="phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="11 位手机号">
+      </div>
+
+      <div class="gap">
+        <label for="addr">收货地址</label>
+        <textarea id="addr" maxlength="200" autocomplete="street-address" placeholder="省 / 市 / 区 + 详细地址，门牌号写全"></textarea>
+      </div>
+
+      <div class="gap">
+        <label for="nick">微信昵称 <span class="opt">（选填，方便对上人）</span></label>
+        <input id="nick" maxlength="32" placeholder="微信里显示的名字">
+      </div>
+
+      <div class="gap">
+        <label for="date">希望哪天发 <span class="opt">（选填）</span></label>
+        <input id="date" type="date">
+      </div>
+
+      <div class="gap">
+        <label for="remark">留一句话 <span class="opt">（选填）</span></label>
+        <input id="remark" maxlength="200" placeholder="比如：工作日收不到，周末发">
+      </div>
+
+      <button class="go" type="button" id="go">提交登记</button>
+      <div class="err" id="err"></div>
+    </div>
+  </div>
+
+  <div class="card done" id="done"></div>
+  <div class="foot">蟹记</div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id) }
+  var errEl = $('err'), goEl = $('go'), doneEl = $('done'), formEl = $('form')
+
+  // 链接里的 token 是唯一的入场券，服务端签的，页面只负责原样带回去
+  var token = (new URLSearchParams(location.search).get('t') || '').trim()
+
+  var specs = []   // 后端 /api/public/specs 的原样数据
+  var qty = {}     // spec_id -> 几盒（非套餐是几只）
+  var male = {}    // spec_id -> 每盒公的只数；没动过就没有这个键
+  var minLoose = 0 // 散买起订只数，跟着价目表一起从后端拿，不在这儿写死
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    })
+  }
+
+  // 金额一律是「分」的整数，分转元走整数运算，不碰浮点
+  function yuan(cents) {
+    var n = Math.round(cents)
+    var sign = n < 0 ? '-' : ''
+    n = Math.abs(n)
+    var f = n % 100
+    return sign + '¥' + Math.floor(n / 100) + '.' + (f < 10 ? '0' + f : f)
+  }
+
+  function todayStr() {
+    var d = new Date()
+    var p = function (n) { return n < 10 ? '0' + n : '' + n }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+  }
+
+  function fmtDay(v) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ''))
+    return m ? (+m[2]) + '月' + (+m[3]) + '日' : String(v || '')
+  }
+
+  function request(method, url, body, cb) {
+    var req = new XMLHttpRequest()
+    req.open(method, url, true)
+    req.timeout = 15000
+    if (body) req.setRequestHeader('Content-Type', 'application/json')
+    req.onload = function () {
+      var parsed
+      try { parsed = JSON.parse(req.responseText) } catch (x) { parsed = null }
+      cb(null, parsed)
+    }
+    req.onerror = req.ontimeout = function () { cb(new Error('network')) }
+    req.send(body ? JSON.stringify(body) : null)
+  }
+
+  // ---------- 价目 ----------
+
+  // 一档一行。买家只填「要几只」，凑不凑得满整盒是服务端的事，
+  // 这里只把拆法与金额当场显示出来，让他知道差几只能凑满一盒。
+  function renderSpecs() {
+    if (!specs.length) {
+      $('specs').innerHTML = '<div class="dead">这会儿没有可登记的档，<br>问一下再来</div>'
+      return
+    }
+    var html = ''
+    for (var i = 0; i < specs.length; i++) {
+      var s = specs[i]
+      var n = qty[s.id] || 0
+      html +=
+        '<div class="pack">' +
+          '<div class="spec">' +
+            '<div class="name">' +
+              '<div class="t">' + esc(packName(s)) + '</div>' +
+              priceHtml(s) +
+            '</div>' +
+            qtyBox(s.id, n) +
+          '</div>' +
+          '<div class="split" id="s' + s.id + '"></div>' +
+          ratioRow(s, n) +
+        '</div>'
+    }
+    $('specs').innerHTML = html
+
+    var btns = $('specs').getElementsByTagName('button')
+    for (var k = 0; k < btns.length; k++) {
+      btns[k].addEventListener('click', function () {
+        bump(this.getAttribute('data-id'), this.getAttribute('data-k'), +this.getAttribute('data-d'))
+      })
+    }
+    for (var j = 0; j < specs.length; j++) {
+      bindInput(specs[j].id)
+      refresh(specs[j].id)
+    }
+    total()
+  }
+
+  // 套餐名里已经写了盒里装什么，不再加「公母」前缀，那个前缀说不出任何东西
+  function packName(s) {
+    return s.pack_size > 0 ? s.spec_label : s.gender_text + s.spec_label
+  }
+
+  // 套餐要把两种价都摆出来，不然买家不知道凑整盒有什么好处
+  // 两行写，别挤成一行然后在窄屏上乱折
+  function priceHtml(s) {
+    if (s.pack_size > 0) {
+      return '<div class="p">' + esc(yuan(s.unit_price) + ' / 盒') + '</div>' +
+             '<div class="p">' + esc('散买 ' + yuan(s.loose_price) + ' / 只') + '</div>'
+    }
+    return '<div class="p">' + esc(yuan(s.unit_price) + ' / ' + s.unit_text) + '</div>'
+  }
+
+  // 只数用输入框：要 16 只不该点十六下
+  function qtyBox(id, n) {
+    return '<div class="step">' +
+      '<button type="button" data-id="' + id + '" data-k="q" data-d="-1" aria-label="减少"' +
+        (n ? '' : ' disabled') + '>−</button>' +
+      '<input class="n' + (n ? '' : ' zero') + '" id="q' + id + '" type="number" inputmode="numeric" ' +
+        'min="0" max="' + MAX + '" value="' + n + '" aria-label="要几只">' +
+      '<button type="button" data-id="' + id + '" data-k="q" data-d="1" aria-label="增加">+</button>' +
+    '</div>'
+  }
+
+  function ratioRow(s, n) {
+    var m = maleOf(s)
+    return '<div class="ratio' + (n ? ' on' : '') + '" id="r' + s.id + '">' +
+      '<span class="lab">其中 公 <b id="mv' + s.id + '">' + m + '</b> 只 · 母 <b id="fv' + s.id + '">' +
+        (n - m) + '</b> 只</span>' +
+      '<div class="step">' +
+        '<button type="button" data-id="' + s.id + '" data-k="m" data-d="-1" aria-label="少一只公"' +
+          (m ? '' : ' disabled') + '>−</button>' +
+        '<span class="n" id="m' + s.id + '">' + m + '</span>' +
+        '<button type="button" data-id="' + s.id + '" data-k="m" data-d="1" aria-label="多一只公">+</button>' +
+      '</div>' +
+    '</div>'
+  }
+
+  // MAX 与后端 regMaxQuantity 对齐：后端也拦，这里只是不让人白填
+  var MAX = 200
+
+  // 默认一半一半。没动过就不往请求里塞 male_count，让后端自己取默认值。
+  function maleOf(s) {
+    var n = qty[s.id] || 0
+    return male[s.id] == null ? Math.floor(n / 2) : Math.min(male[s.id], n)
+  }
+
+  function specById(id) {
+    for (var i = 0; i < specs.length; i++) {
+      if (String(specs[i].id) === String(id)) return specs[i]
+    }
+    return null
+  }
+
+  function bindInput(id) {
+    var el = $('q' + id)
+    if (!el) return
+    el.addEventListener('input', function () {
+      var n = parseInt(el.value, 10)
+      if (isNaN(n) || n < 0) n = 0
+      if (n > MAX) { n = MAX; el.value = n }
+      setQty(id, n, true)
+    })
+    el.addEventListener('blur', function () {
+      if (el.value === '') el.value = qty[id] || 0
+    })
+  }
+
+  // kind: q=只数 / m=其中公几只
+  function bump(id, kind, d) {
+    var s = specById(id)
+    if (!s) return
+    if (kind === 'm') {
+      var n = qty[id] || 0
+      var m = maleOf(s) + d
+      if (m < 0) m = 0
+      if (m > n) m = n
+      male[id] = m
+      refresh(id)
+      return
+    }
+    var v = (qty[id] || 0) + d
+    if (v < 0) v = 0
+    if (v > MAX) v = MAX
+    setQty(id, v, false)
+  }
+
+  // fromInput 为 true 时不回写输入框，免得打断正在输入的人
+  function setQty(id, n, fromInput) {
+    qty[id] = n
+    var el = $('q' + id)
+    if (el) {
+      if (!fromInput) el.value = n
+      el.className = 'n' + (n ? '' : ' zero')
+      var minus = el.parentNode.getElementsByTagName('button')[0]
+      if (minus) minus.disabled = !n
+    }
+    refresh(id)
+    total()
+  }
+
+  // 刷新这一档的拆分说明与公母行
+  function refresh(id) {
+    var s = specById(id)
+    if (!s) return
+    var n = qty[id] || 0
+    var m = maleOf(s)
+
+    var row = $('r' + id)
+    if (row) row.className = 'ratio' + (n ? ' on' : '')
+    setText('mv' + id, m)
+    setText('fv' + id, n - m)
+    setText('m' + id, m)
+    disableMinus('m' + id, m <= 0)
+
+    var box = $('s' + id)
+    if (!box) return
+    if (!n) { box.className = 'split'; box.innerHTML = ''; return }
+
+    var info = splitOf(s, n)
+    box.className = 'split' + (info.short ? ' bad' : ' on')
+    if (info.short) {
+      box.className = 'split on bad'
+      box.innerHTML = esc('散买最少 ' + minLoose + ' 只起。' + info.loose + ' 只凑不满一盒，' +
+        '改成 ' + info.down + ' 只或 ' + info.up + ' 只')
+    } else {
+      box.innerHTML = esc(info.text + '　' + yuan(info.amount))
+    }
+  }
+
+  // 按盒拆：整盒走套餐价，零头走散买价。不是套餐的档整条按只算。
+  function splitOf(s, n) {
+    if (!s.pack_size) {
+      return { amount: n * s.unit_price, text: n + ' ' + s.unit_text, short: false }
+    }
+    var boxes = Math.floor(n / s.pack_size)
+    var loose = n % s.pack_size
+    var out = {
+      boxes: boxes,
+      loose: loose,
+      amount: boxes * s.unit_price + loose * s.loose_price,
+      short: loose > 0 && loose < minLoose,
+      down: boxes * s.pack_size,
+      up: boxes * s.pack_size + minLoose
+    }
+    var parts = []
+    if (boxes) parts.push(boxes + ' 盒')
+    if (loose) parts.push('散 ' + loose + ' 只')
+    out.text = parts.join(' + ')
+    return out
+  }
+
+  function setText(id, v) { var el = $(id); if (el) el.textContent = v }
+  function disableMinus(id, off) {
+    var el = $(id)
+    if (!el) return
+    var minus = el.parentNode.getElementsByTagName('button')[0]
+    if (minus) minus.disabled = off
+  }
+
+  function total() {
+    var sum = 0
+    var crabs = 0
+    for (var i = 0; i < specs.length; i++) {
+      var s = specs[i]
+      var n = qty[s.id] || 0
+      if (!n) continue
+      sum += splitOf(s, n).amount
+      crabs += n
+    }
+    $('total').textContent = yuan(sum)
+    $('count').textContent = crabs > 0 ? '· 共 ' + crabs + ' 只' : ''
+  }
+
+  function loadSpecs() {
+    request('GET', '/api/public/specs', null, function (e, body) {
+      if (e || !body || body.code !== 0 || !body.data) {
+        $('specs').innerHTML = '<div class="dead">价目没取到，刷新一下试试</div>'
+        return
+      }
+      specs = body.data.list || []
+      minLoose = body.data.min_loose || 0
+      renderSpecs()
+      // 起订量写在提示里，数字跟着后端走
+      if (minLoose > 0) {
+        $('hint').innerHTML = $('hint').innerHTML + '<br>凑不满整盒的部分，最少 ' + minLoose + ' 只起。'
+      }
+    })
+  }
+
+  // ---------- 提交 ----------
+
+  function pickedItems() {
+    var out = []
+    for (var i = 0; i < specs.length; i++) {
+      var s = specs[i]
+      var n = qty[s.id] || 0
+      if (!n) continue
+      var item = { spec_id: s.id, quantity: n }
+      // 只有动过比例才传：没传时后端按一半一半算，两边的默认值是同一个
+      if (male[s.id] != null) item.male_count = Math.min(male[s.id], n)
+      out.push(item)
+    }
+    return out
+  }
+
+  function submit() {
+    var items = pickedItems()
+    var name = $('name').value.trim()
+    var phone = $('phone').value.trim()
+    var addr = $('addr').value.trim()
+
+    if (!items.length) { fail('先填一下要几只'); return }
+    // 零头不够的档在自己那行已经标红了，这里只兜一句，别让人以为按钮坏了
+    for (var i = 0; i < specs.length; i++) {
+      var s = specs[i]
+      var n = qty[s.id] || 0
+      if (!n) continue
+      var info = splitOf(s, n)
+      if (info.short) {
+        fail('「' + s.spec_label + '」散买最少 ' + minLoose + ' 只起，改成 ' + info.down + ' 只或 ' + info.up + ' 只')
+        return
+      }
+    }
+    if (!name) { fail('收货人还没填'); return }
+    if (!/^1[3-9]\d{9}$/.test(phone)) { fail('手机号看着不对，检查一下'); return }
+    if (addr.length < 5) { fail('地址写详细一点，门牌号别漏'); return }
+
+    errEl.textContent = ''
+    goEl.disabled = true
+    goEl.textContent = '提交中'
+
+    request('POST', '/api/public/registrations', {
+      token: token,
+      receiver_name: name,
+      phone: phone,
+      address: addr,
+      wechat_nick: $('nick').value.trim(),
+      items: items,
+      expect_ship_date: $('date').value || '',
+      remark: $('remark').value.trim()
+    }, function (e, body) {
+      goEl.disabled = false
+      goEl.textContent = '提交登记'
+      if (e) { fail('网络不太好，再试一次'); return }
+      if (!body) { fail('提交失败，等会儿再试'); return }
+      if (body.code === 0 && body.data) { receipt(body.data); return }
+      // 后端的 msg 都是写给买家看的话，直接显示
+      fail(body.msg || '提交失败，等会儿再试')
+    })
+  }
+
+  function fail(msg) { errEl.textContent = msg }
+
+  // ---------- 回执 ----------
+
+  function receipt(d) {
+    var html =
+      '<div class="tick">✓</div>' +
+      '<div class="no">' + esc(d.order_no) + '</div>' +
+      '<div class="cap">' + (d.idempotent ? '这条链接之前已经登记过了，就是这一单' : '登记好了，稍后跟你确认') + '</div>' +
+      '<div class="kv"><span class="k">收货人</span><span class="v">' + esc(d.receiver_name) + '</span></div>' +
+      '<div class="kv"><span class="k">规格</span><span class="v">' + esc(d.items_summary) + '</span></div>' +
+      // 这里显示的是后端算出来的应收，不是页面上那个预估
+      '<div class="kv"><span class="k">货款</span><span class="v">' + esc(yuan(d.payable_amount)) + '</span></div>' +
+      (d.expect_ship_date ? '<div class="kv"><span class="k">希望发货</span><span class="v">' + esc(fmtDay(d.expect_ship_date)) + '</span></div>' : '') +
+      '<div class="line">' +
+        '单号记一下，或者截个图。<br>' +
+        '运费和最终费用等发出后确认。<br>' +
+        '发货之后可以在 <a href="/t?no=' + encodeURIComponent(d.order_no) + '">这里查物流</a>（要填手机后四位）。' +
+      '</div>'
+    doneEl.innerHTML = html
+    doneEl.className = 'card done on'
+    formEl.className = 'form off'
+    $('sub').textContent = '登记完成'
+    window.scrollTo(0, 0)
+  }
+
+  // ---------- 起手 ----------
+
+  if (!token) {
+    formEl.className = 'form off'
+    doneEl.innerHTML = '<div class="dead">这条链接不完整，<br>重新要一条吧</div>'
+    doneEl.className = 'card done on'
+    $('sub').textContent = '链接有点问题'
+    return
+  }
+
+  // 希望发货日期不能往回填，后端也会拦
+  $('date').min = todayStr()
+
+  goEl.addEventListener('click', submit)
+  loadSpecs()
+})()
+</script>
+</body>
+</html>

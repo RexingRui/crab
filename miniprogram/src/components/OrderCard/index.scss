@@ -25,7 +25,21 @@
     gap: 12px;
   }
 
+  &__who {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+  }
+
   &__name { font-size: 30px; font-weight: 600; }
+
+  // 出处，不是状态：灰字、不描边、不占地方
+  &__src {
+    font-size: 22px;
+    color: $muted;
+    white-space: nowrap;
+  }
 
   &__tags {
     display: flex;

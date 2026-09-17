@@ -173,7 +173,7 @@ func likePattern(s string) string {
 const orderColumns = `id, order_no, request_id, receiver_name, phone, address,
 	wechat_nick, wechat_remark, goods_amount, freight_fee, discount, payable_amount,
 	paid_amount, ship_status, pay_status, ship_company, tracking_no, expect_ship_date,
-	ship_time, receive_time, first_pay_time, settled_time, remark,
+	ship_time, receive_time, first_pay_time, settled_time, remark, source,
 	created_at, updated_at, deleted_at`
 
 type rowScanner interface {
@@ -196,13 +196,16 @@ func scanOrder(sc rowScanner) (*model.Order, error) {
 		&o.WechatNick, &o.WechatRemark, &o.GoodsAmount, &o.FreightFee, &o.Discount,
 		&o.PayableAmount, &o.PaidAmount, &o.ShipStatus, &o.PayStatus,
 		&o.ShipCompany, &o.TrackingNo, &expect,
-		&shipT, &recvT, &firstPay, &settled, &o.Remark,
+		&shipT, &recvT, &firstPay, &settled, &o.Remark, &o.Source,
 		&o.CreatedAt, &o.UpdatedAt, &deleted,
 	)
 	if err != nil {
 		return nil, err
 	}
 	o.RequestID = toStr(reqID)
+	if o.Source == "" {
+		o.Source = model.SourceManual
+	}
 	o.ExpectShipDate = toStr(expect)
 	o.ShipTime = toPtr(shipT)
 	o.ReceiveTime = toPtr(recvT)
@@ -212,14 +215,22 @@ func scanOrder(sc rowScanner) (*model.Order, error) {
 	return &o, nil
 }
 
+// sourceOrDefault 兜住零值：订单来源不写死在调用方，漏传就是卖家自己录的。
+func sourceOrDefault(s model.Source) model.Source {
+	if s == "" {
+		return model.SourceManual
+	}
+	return s
+}
+
 func (q *queries) InsertOrder(ctx context.Context, o *model.Order) error {
 	const sqlStr = `INSERT INTO orders(
 		order_no, request_id, receiver_name, phone, address, wechat_nick, wechat_remark,
 		goods_amount, freight_fee, discount, payable_amount, paid_amount,
 		ship_status, pay_status, ship_company, tracking_no, expect_ship_date,
-		ship_time, receive_time, first_pay_time, settled_time, remark,
+		ship_time, receive_time, first_pay_time, settled_time, remark, source,
 		created_at, updated_at, deleted_at)
-	VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 
 	res, err := q.db.ExecContext(ctx, sqlStr,
 		o.OrderNo, nullString(o.RequestID), o.ReceiverName, o.Phone, o.Address,
@@ -228,7 +239,7 @@ func (q *queries) InsertOrder(ctx context.Context, o *model.Order) error {
 		string(o.ShipStatus), string(o.PayStatus), o.ShipCompany, o.TrackingNo,
 		nullString(o.ExpectShipDate),
 		nullInt(o.ShipTime), nullInt(o.ReceiveTime), nullInt(o.FirstPayTime), nullInt(o.SettledTime),
-		o.Remark, o.CreatedAt, o.UpdatedAt, nullInt(o.DeletedAt),
+		o.Remark, string(sourceOrDefault(o.Source)), o.CreatedAt, o.UpdatedAt, nullInt(o.DeletedAt),
 	)
 	if err != nil {
 		if IsUniqueViolation(err) {
@@ -310,6 +321,17 @@ func (q *queries) GetOrderByRequestID(ctx context.Context, requestID string) (*m
 	return q.getOrderBy(ctx, "request_id=?", requestID)
 }
 
+func (q *queries) CountOrdersByPhoneSince(ctx context.Context, phone string, since int64) (int, error) {
+	var n int
+	err := q.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM orders WHERE phone=? AND created_at>=? AND deleted_at IS NULL`,
+		phone, since).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count orders by phone: %w", err)
+	}
+	return n, nil
+}
+
 // buildOrderFilter 把筛选条件翻译成 WHERE 片段与参数。
 func buildOrderFilter(f model.OrderFilter) (string, []any) {
 	where := []string{"deleted_at IS NULL"}
@@ -330,6 +352,10 @@ func buildOrderFilter(f model.OrderFilter) (string, []any) {
 			args = append(args, string(s))
 		}
 		where = append(where, "pay_status IN ("+strings.Join(ph, ",")+")")
+	}
+	if f.Source != "" {
+		where = append(where, "source = ?")
+		args = append(args, string(f.Source))
 	}
 	if f.Keyword != "" {
 		p := likePattern(f.Keyword)

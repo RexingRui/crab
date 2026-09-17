@@ -17,6 +17,14 @@
     margin-top: 16px;
   }
 
+  // 出处提示，不是状态：灰字一行，别做成横幅
+  &__src {
+    display: block;
+    margin-top: 16px;
+    font-size: 24px;
+    color: $muted;
+  }
+
   &__overdue { font-size: 22px; color: $boiled; font-weight: 600; }
 
   &__line {

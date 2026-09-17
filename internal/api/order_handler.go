@@ -380,7 +380,7 @@ func (a *API) ExportOrders(w http.ResponseWriter, r *http.Request) {
 	_ = cw.Write([]string{
 		"单号", "创建时间", "收货人", "手机", "地址", "微信备注", "明细摘要",
 		"货款", "运费", "优惠", "应收", "实收", "未收",
-		"发货状态", "收款状态", "快递公司", "运单号", "约定发货日", "发货时间", "备注",
+		"发货状态", "收款状态", "快递公司", "运单号", "约定发货日", "发货时间", "备注", "来源",
 	})
 	for _, o := range list {
 		shipTime := ""
@@ -409,6 +409,7 @@ func (a *API) ExportOrders(w http.ResponseWriter, r *http.Request) {
 			o.ExpectShipDate,
 			shipTime,
 			o.Remark,
+			o.Source.Text(),
 		})
 	}
 }
@@ -437,6 +438,13 @@ func parseOrderFilter(r *http.Request, paginate bool) (model.OrderFilter, error)
 			return f, errs.InvalidParam("ship_status 非法：%s", v)
 		}
 		f.ShipStatus = append(f.ShipStatus, s)
+	}
+	if v := strings.TrimSpace(q.Get("source")); v != "" {
+		src := model.Source(v)
+		if !src.Valid() {
+			return f, errs.InvalidParam("source 非法，应为 manual/web")
+		}
+		f.Source = src
 	}
 	for _, v := range splitCSV(q.Get("pay_status")) {
 		s := model.PayStatus(v)

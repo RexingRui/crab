@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"crab-order/internal/model"
+	"crab-order/internal/service"
 	"crab-order/internal/timex"
 )
 
@@ -83,9 +84,11 @@ type OrderDTO struct {
 	FirstPayTime   *string `json:"first_pay_time"`
 	SettledTime    *string `json:"settled_time"`
 
-	Remark    string `json:"remark"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Remark     string `json:"remark"`
+	Source     string `json:"source"`
+	SourceText string `json:"source_text"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 
 	Payments []PaymentDTO `json:"payments"`
 	Logs     []LogDTO     `json:"logs"`
@@ -133,9 +136,11 @@ type OrderSummaryDTO struct {
 	FirstPayTime   *string `json:"first_pay_time"`
 	SettledTime    *string `json:"settled_time"`
 
-	Remark    string `json:"remark"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Remark     string `json:"remark"`
+	Source     string `json:"source"`
+	SourceText string `json:"source_text"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 // PublicOrderDTO 是买家免登录查单的脱敏视图：不含金额、备注与详细地址。
@@ -153,6 +158,42 @@ type PublicOrderDTO struct {
 	ShipTime       *string `json:"ship_time"`
 }
 
+// PublicSpecDTO 是买家登记页看到的规格：只给选规格必需的字段，
+// 不含 sort_no / updated_at 这类内部信息。
+type PublicSpecDTO struct {
+	ID            int64  `json:"id"`
+	Gender        string `json:"gender"`
+	GenderText    string `json:"gender_text"`
+	SpecGram      int    `json:"spec_gram"`
+	SpecLabel     string `json:"spec_label"`
+	Unit          string `json:"unit"`
+	UnitText      string `json:"unit_text"`
+	UnitPrice     int64  `json:"unit_price"`
+	UnitPriceYuan string `json:"unit_price_yuan"`
+	// PackSize 一盒几只，0 表示不是套餐（按只卖）。
+	PackSize int `json:"pack_size"`
+	// LoosePrice 凑不满一盒时，散买一只多少钱（整盒价摊开后向上取整到元）。
+	// 不是套餐的档就是它自己的单价。
+	LoosePrice     int64  `json:"loose_price"`
+	LoosePriceYuan string `json:"loose_price_yuan"`
+}
+
+// RegistrationDTO 是买家提交登记后的回执：够他记住单号、核对自己填了什么就行，
+// 不回显手机号与完整地址（页面上本来就是他自己刚填的），也不含收款信息。
+type RegistrationDTO struct {
+	OrderNo           string  `json:"order_no"`
+	ReceiverName      string  `json:"receiver_name"`
+	ItemsSummary      string  `json:"items_summary"`
+	GoodsAmount       int64   `json:"goods_amount"`
+	GoodsAmountYuan   string  `json:"goods_amount_yuan"`
+	PayableAmount     int64   `json:"payable_amount"`
+	PayableAmountYuan string  `json:"payable_amount_yuan"`
+	ExpectShipDate    *string `json:"expect_ship_date"`
+	CreatedAt         string  `json:"created_at"`
+	// Idempotent 为 true 表示这条链接之前已经提交过，返回的是原来那笔单。
+	Idempotent bool `json:"idempotent,omitempty"`
+}
+
 type SpecDTO struct {
 	ID            int64  `json:"id"`
 	Gender        string `json:"gender"`
@@ -163,6 +204,7 @@ type SpecDTO struct {
 	UnitText      string `json:"unit_text"`
 	UnitPrice     int64  `json:"unit_price"`
 	UnitPriceYuan string `json:"unit_price_yuan"`
+	PackSize      int    `json:"pack_size"`
 	Enabled       bool   `json:"enabled"`
 	SortNo        int    `json:"sort_no"`
 	UpdatedAt     string `json:"updated_at"`
@@ -280,9 +322,11 @@ func ToOrderDTO(o *model.Order) OrderDTO {
 		FirstPayTime:   timex.FormatPtr(o.FirstPayTime),
 		SettledTime:    timex.FormatPtr(o.SettledTime),
 
-		Remark:    o.Remark,
-		CreatedAt: timex.Format(o.CreatedAt),
-		UpdatedAt: timex.Format(o.UpdatedAt),
+		Remark:     o.Remark,
+		Source:     string(o.Source),
+		SourceText: o.Source.Text(),
+		CreatedAt:  timex.Format(o.CreatedAt),
+		UpdatedAt:  timex.Format(o.UpdatedAt),
 
 		Payments: payments,
 		Logs:     logs,
@@ -327,9 +371,11 @@ func ToOrderSummaryDTO(o *model.Order) OrderSummaryDTO {
 		FirstPayTime:   timex.FormatPtr(o.FirstPayTime),
 		SettledTime:    timex.FormatPtr(o.SettledTime),
 
-		Remark:    o.Remark,
-		CreatedAt: timex.Format(o.CreatedAt),
-		UpdatedAt: timex.Format(o.UpdatedAt),
+		Remark:     o.Remark,
+		Source:     string(o.Source),
+		SourceText: o.Source.Text(),
+		CreatedAt:  timex.Format(o.CreatedAt),
+		UpdatedAt:  timex.Format(o.UpdatedAt),
 	}
 }
 
@@ -357,6 +403,47 @@ func ToPublicOrderDTO(o *model.Order) PublicOrderDTO {
 	}
 }
 
+func ToPublicSpecDTO(s model.Spec) PublicSpecDTO {
+	return PublicSpecDTO{
+		ID:             s.ID,
+		Gender:         string(s.Gender),
+		GenderText:     s.Gender.Text(),
+		SpecGram:       s.SpecGram,
+		SpecLabel:      s.SpecLabel,
+		Unit:           string(s.Unit),
+		UnitText:       s.Unit.Text(),
+		UnitPrice:      s.UnitPrice,
+		UnitPriceYuan:  model.FormatYuan(s.UnitPrice),
+		PackSize:       s.PackSize,
+		LoosePrice:     service.LoosePrice(s),
+		LoosePriceYuan: model.FormatYuan(service.LoosePrice(s)),
+	}
+}
+
+// ToRegistrationDTO 构造买家登记回执。买家页显示的应收是服务端算的，不是页面自己加的。
+//
+// idem 为 true 表示这条链接之前已经被提交过，回执里是**别人可能填的**那笔单：
+// 链接会被转发，拿到转发链接的人提交一次就能看到这个回执，所以这种情况下姓名要打码。
+// 首次提交回显的是他自己刚填的内容，不需要打码。
+func ToRegistrationDTO(o *model.Order, idem bool) RegistrationDTO {
+	name := o.ReceiverName
+	if idem {
+		name = MaskName(name)
+	}
+	return RegistrationDTO{
+		OrderNo:           o.OrderNo,
+		ReceiverName:      name,
+		ItemsSummary:      o.ItemsSummary(),
+		GoodsAmount:       o.GoodsAmount,
+		GoodsAmountYuan:   model.FormatYuan(o.GoodsAmount),
+		PayableAmount:     o.PayableAmount,
+		PayableAmountYuan: model.FormatYuan(o.PayableAmount),
+		ExpectShipDate:    nilIfEmpty(o.ExpectShipDate),
+		CreatedAt:         timex.Format(o.CreatedAt),
+		Idempotent:        idem,
+	}
+}
+
 func ToSpecDTO(s model.Spec) SpecDTO {
 	return SpecDTO{
 		ID:            s.ID,
@@ -368,6 +455,7 @@ func ToSpecDTO(s model.Spec) SpecDTO {
 		UnitText:      s.Unit.Text(),
 		UnitPrice:     s.UnitPrice,
 		UnitPriceYuan: model.FormatYuan(s.UnitPrice),
+		PackSize:      s.PackSize,
 		Enabled:       s.Enabled,
 		SortNo:        s.SortNo,
 		UpdatedAt:     timex.Format(s.UpdatedAt),

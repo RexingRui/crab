@@ -34,7 +34,9 @@ type Order struct {
 	FirstPayTime   *int64
 	SettledTime    *int64
 
-	Remark    string
+	Remark string
+	// Source 订单来源，空串按 manual 处理（老数据没有这一列）。
+	Source    Source
 	CreatedAt int64
 	UpdatedAt int64
 	DeletedAt *int64
@@ -49,13 +51,19 @@ type Order struct {
 func (o *Order) UnpaidAmount() int64 { return o.PayableAmount - o.PaidAmount }
 
 // ItemsSummary 明细摘要，形如 "公4.5两×5, 母3.5两×5"，用于列表与导出。
+//
+// 套餐（mixed）不加「公母」前缀：一盒里公母都有，前缀说不出任何东西，
+// 而它的 spec_label 本来就写着盒里装的是什么。
 func (o *Order) ItemsSummary() string {
 	s := ""
 	for i, it := range o.Items {
 		if i > 0 {
 			s += ", "
 		}
-		s += it.Gender.Text() + it.SpecLabel + "×" + strconv.Itoa(it.Quantity)
+		if it.Gender != GenderMixed {
+			s += it.Gender.Text()
+		}
+		s += it.SpecLabel + "×" + strconv.Itoa(it.Quantity)
 	}
 	return s
 }
@@ -100,7 +108,8 @@ type OrderLog struct {
 	CreatedAt int64
 }
 
-// Spec 规格价目表，仅在录单时用于填充默认值。
+// Spec 价目表的一档。按只卖就是一只的价，按套餐卖就是一盒的价。
+// 仅在录单与买家登记时用于填充默认值，订单明细存的是快照，不回头关联这张表。
 type Spec struct {
 	ID        int64
 	Gender    Gender
@@ -108,10 +117,16 @@ type Spec struct {
 	SpecLabel string
 	Unit      Unit
 	UnitPrice int64
+	// PackSize 一盒几只。0 表示这一档不是套餐（按只/按斤卖）。
+	// 套餐的公母比例由买家在登记页自己定，总数固定为 PackSize，价格不随比例变。
+	PackSize  int
 	Enabled   bool
 	SortNo    int
 	UpdatedAt int64
 }
+
+// IsPack 这一档是不是按盒卖的套餐。
+func (s Spec) IsPack() bool { return s.PackSize > 0 }
 
 // Address 地址簿条目，从历史订单聚合而来，不单独建客户表。
 type Address struct {
@@ -135,6 +150,7 @@ const (
 type OrderFilter struct {
 	ShipStatus          []ShipStatus
 	PayStatus           []PayStatus
+	Source              Source
 	Keyword             string
 	ExpectShipDate      string
 	ExpectShipDateStart string

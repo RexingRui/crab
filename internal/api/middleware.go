@@ -270,16 +270,29 @@ func (rl *RateLimiter) Close() {
 }
 
 // RateLimit 仅对 /api/public/** 与 /api/login 生效。
-func RateLimit(rl *RateLimiter) Middleware {
+// 公开的写请求（买家登记）走更紧的那个配额，不和查单共用。
+func RateLimit(rl, wl *RateLimiter) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if rateLimited(r.URL.Path) && !rl.Allow(ClientIP(r)) {
+			if limiter := limiterFor(r, rl, wl); limiter != nil && !limiter.Allow(ClientIP(r)) {
 				Fail(w, r, errs.New(errs.CodeRateLimited, "请求过于频繁，请稍后再试"))
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// limiterFor 挑出这条请求该用哪个配额，不限流的路径返回 nil。
+func limiterFor(r *http.Request, rl, wl *RateLimiter) *RateLimiter {
+	path := r.URL.Path
+	if !rateLimited(path) {
+		return nil
+	}
+	if r.Method != http.MethodGet && strings.HasPrefix(path, "/api/public/") {
+		return wl
+	}
+	return rl
 }
 
 func rateLimited(path string) bool {

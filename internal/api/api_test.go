@@ -57,14 +57,16 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 
 	cfg := &config.Config{
-		Env:             config.EnvDev,
-		HTTPAddr:        ":0",
-		DBPath:          "test",
-		AuthSecret:      testSecret,
-		AuthTokenTTL:    time.Hour,
-		AdminOpenIDs:    []string{testAdminID},
-		Timezone:        "Asia/Shanghai",
-		PublicRateLimit: 20,
+		Env:                  config.EnvDev,
+		HTTPAddr:             ":0",
+		DBPath:               "test",
+		AuthSecret:           testSecret,
+		AuthTokenTTL:         time.Hour,
+		AdminOpenIDs:         []string{testAdminID},
+		RegLinkTTL:           time.Hour,
+		Timezone:             "Asia/Shanghai",
+		PublicRateLimit:      20,
+		PublicWriteRateLimit: 20,
 	}
 	signer := auth.NewSigner(cfg.AuthSecret, cfg.AuthTokenTTL)
 	a := New(cfg, st, signer, wechat.NewClient("wxtest", "secret"))
@@ -562,8 +564,14 @@ func TestSpecsAndAddresses(t *testing.T) {
 	if err := json.Unmarshal(data, &specs); err != nil {
 		t.Fatalf("解析规格失败: %v", err)
 	}
-	if specs.Total != 8 {
-		t.Fatalf("种子数据应有 8 条规格，实际 %d", specs.Total)
+	// 种子价目表是 4 档套餐（8 只装，四个价位）
+	if specs.Total != 4 {
+		t.Fatalf("种子数据应有 4 档，实际 %d", specs.Total)
+	}
+	for _, sp := range specs.List {
+		if sp.PackSize != 8 || sp.Unit != "box" {
+			t.Fatalf("种子档应是 8 只装的盒装，实际 %+v", sp)
+		}
 	}
 
 	// 新增
@@ -590,13 +598,13 @@ func TestSpecsAndAddresses(t *testing.T) {
 	e.mustOK(t, http.MethodDelete, "/api/specs/"+itoa(sp.ID), nil)
 	data = e.mustOK(t, http.MethodGet, "/api/specs", nil)
 	_ = json.Unmarshal(data, &specs)
-	if specs.Total != 8 {
-		t.Errorf("停用后默认列表应仍是 8 条，实际 %d", specs.Total)
+	if specs.Total != 4 {
+		t.Errorf("停用后默认列表应仍是 4 档，实际 %d", specs.Total)
 	}
 	data = e.mustOK(t, http.MethodGet, "/api/specs?all=1", nil)
 	_ = json.Unmarshal(data, &specs)
-	if specs.Total != 9 {
-		t.Errorf("all=1 应返回 9 条，实际 %d", specs.Total)
+	if specs.Total != 5 {
+		t.Errorf("all=1 应返回 5 档，实际 %d", specs.Total)
 	}
 
 	// 地址簿：下过单之后才有
@@ -619,21 +627,13 @@ func TestSpecPriceChangeDoesNotAffectHistory(t *testing.T) {
 	e := newTestEnv(t)
 	old := decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", sampleOrderBody()))
 
-	data := e.mustOK(t, http.MethodGet, "/api/specs", nil)
-	var specs struct {
-		List []SpecDTO `json:"list"`
-	}
-	_ = json.Unmarshal(data, &specs)
-
+	// 建一档和历史订单明细对得上的规格（公 4.5 两，88 元），再把它涨到 95 元
+	created := e.mustOK(t, http.MethodPost, "/api/specs", map[string]any{
+		"gender": "male", "spec_gram": 225, "spec_label": "4.5两", "unit": "piece", "unit_price": 8800,
+	})
 	var target SpecDTO
-	for _, s := range specs.List {
-		if s.Gender == "male" && s.SpecGram == 225 {
-			target = s
-			break
-		}
-	}
-	if target.ID == 0 {
-		t.Fatal("没找到公 4.5 两的规格")
+	if err := json.Unmarshal(created, &target); err != nil {
+		t.Fatalf("解析规格失败: %v", err)
 	}
 
 	e.mustOK(t, http.MethodPut, "/api/specs/"+itoa(target.ID), map[string]any{

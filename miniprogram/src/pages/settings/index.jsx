@@ -14,8 +14,18 @@ import { toast, login } from '../../utils/request'
 import './index.scss'
 
 const EMPTY_SPEC = {
-  id: null, gender: 'male', spec_gram: '', spec_label: '',
-  unit: 'piece', unit_price: '', enabled: true, sort_no: 0
+  id: null, gender: 'mixed', spec_gram: '', spec_label: '',
+  unit: 'box', unit_price: '', pack_size: 8, enabled: true, sort_no: 0
+}
+
+/* 一档要么是按盒卖的套餐（一盒里公母都有），要么是按只卖的单规格。
+ * 选哪种决定了 gender / unit / pack_size 三个字段，所以在一个地方切。 */
+const SPEC_KINDS = [['mixed', '套餐'], ['male', '公'], ['female', '母']]
+
+function kindPatch(kind) {
+  return kind === 'mixed'
+    ? { gender: 'mixed', unit: 'box', pack_size: 8 }
+    : { gender: kind, unit: 'piece', pack_size: 0 }
 }
 
 export default function Settings() {
@@ -44,15 +54,25 @@ export default function Settings() {
 
   async function saveSpec() {
     if (guardDemo(toast)) return
-    if (!String(editing.spec_label).trim()) { toast('填一下规格，比如 4.5两'); return }
+    const isPack = editing.gender === 'mixed'
+    if (!String(editing.spec_label).trim()) {
+      toast(isPack ? '填一下档名，比如 8只装 母2.5两/公3.5两' : '填一下规格，比如 4.5两')
+      return
+    }
     const gram = Number(editing.spec_gram)
-    if (!gram || gram <= 0) { toast('填一下克重，4.5两就是 225'); return }
+    if (!gram || gram <= 0) {
+      toast(isPack ? '填一下整盒克重，8 只加起来多少克' : '填一下克重，4.5两就是 225')
+      return
+    }
+    const packSize = isPack ? Number(editing.pack_size) : 0
+    if (isPack && (!packSize || packSize < 1)) { toast('填一下一盒几只'); return }
     const body = {
       gender: editing.gender,
       spec_gram: gram,
       spec_label: String(editing.spec_label).trim(),
-      unit: editing.unit || 'piece',
+      unit: isPack ? 'box' : 'piece',
       unit_price: yuanToFen(editing.unit_price),
+      pack_size: packSize,
       enabled: editing.enabled !== false,
       sort_no: Number(editing.sort_no) || 0
     }
@@ -120,7 +140,9 @@ export default function Settings() {
           {specs.map((spec) => (
             <View className='settings__spec' key={spec.id}>
               <Text className='settings__spec-name'>
-                {spec.gender_text || (spec.gender === 'male' ? '公' : '母')} {spec.spec_label}
+                {/* 套餐的档名里已经写了盒里装什么，不再加「公母」前缀 */}
+                {spec.gender === 'mixed' ? '' : `${spec.gender_text || (spec.gender === 'male' ? '公' : '母')} `}
+                {spec.spec_label}
               </Text>
               <Text className='settings__spec-price num'>{fenToYuan(spec.unit_price)}</Text>
               {spec.enabled === false ? <Text className='sub'>停用</Text> : null}
@@ -128,7 +150,7 @@ export default function Settings() {
               <Text className='settings__del' onClick={() => disableSpec(spec)}>停用</Text>
             </View>
           ))}
-          {specs.length === 0 ? <Text className='settings__blank sub'>还没配规格。</Text> : null}
+          {specs.length === 0 ? <Text className='settings__blank sub'>还没配价目表。</Text> : null}
           <View className='settings__spec-add' onClick={() => editSpec(null)}>+ 加一档</View>
         </View>
         <Text className='settings__hint sub'>改价只影响以后新记的单，已经记过的不动。</Text>
@@ -187,37 +209,50 @@ export default function Settings() {
         {editing ? (
           <>
             <View className='settings__seg'>
-              {[['male', '公'], ['female', '母']].map(([key, label]) => (
+              {SPEC_KINDS.map(([key, label]) => (
                 <Text
                   key={key}
                   className={`settings__seg-item ${editing.gender === key ? 'settings__seg-item--on' : ''}`}
-                  onClick={() => setEditing({ ...editing, gender: key })}
+                  onClick={() => setEditing({ ...editing, ...kindPatch(key) })}
                 >
                   {label}
                 </Text>
               ))}
             </View>
             <View className='field'>
-              <Text className='field__label'>规格</Text>
+              <Text className='field__label'>{editing.gender === 'mixed' ? '档名' : '规格'}</Text>
               <Input
                 className='field__input'
                 value={editing.spec_label}
-                placeholder='4.5两'
+                placeholder={editing.gender === 'mixed' ? '8只装 母2.5两/公3.5两' : '4.5两'}
                 onInput={(e) => setEditing({ ...editing, spec_label: e.detail.value })}
               />
             </View>
+            {editing.gender === 'mixed' ? (
+              <View className='field'>
+                <Text className='field__label'>一盒几只</Text>
+                <Input
+                  className='field__input num'
+                  type='number'
+                  value={String(editing.pack_size)}
+                  placeholder='8'
+                  onInput={(e) => setEditing({ ...editing, pack_size: e.detail.value })}
+                />
+                <Text className='sub'>公母比例买家自己调</Text>
+              </View>
+            ) : null}
             <View className='field'>
               <Text className='field__label'>克重</Text>
               <Input
                 className='field__input num'
                 type='number'
                 value={String(editing.spec_gram)}
-                placeholder='4.5两就是 225'
+                placeholder={editing.gender === 'mixed' ? '整盒加起来多少克' : '4.5两就是 225'}
                 onInput={(e) => setEditing({ ...editing, spec_gram: e.detail.value })}
               />
             </View>
             <View className='field'>
-              <Text className='field__label'>单价</Text>
+              <Text className='field__label'>{editing.gender === 'mixed' ? '每盒' : '单价'}</Text>
               <Input
                 className='field__input num'
                 type='digit'
