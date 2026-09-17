@@ -68,6 +68,7 @@ input[type=tel],input[type=date]{font-variant-numeric:tabular-nums}
   margin-top:16px;padding-top:16px;border-top:1px solid var(--line);
 }
 .sum .k{font-size:13px;color:var(--muted)}
+.sum .cnt{font-variant-numeric:tabular-nums}
 .sum .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.02em}
 .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6}
 
@@ -107,11 +108,11 @@ button.go:disabled{opacity:.45}
       <h2>要哪一档</h2>
       <div id="specs"><div class="dead">正在取当季的价目…</div></div>
       <div class="sum">
-        <span class="k">货款合计</span>
+        <span class="k">货款合计 <span class="cnt" id="count"></span></span>
         <span class="v" id="total">¥0.00</span>
       </div>
-      <div class="hint">按当季价算的货款，不含运费。运费和最终费用等发出后确认。<br>
-      每盒 8 只，公母只数可以自己调，怎么配价格都一样。</div>
+      <div class="hint" id="hint">按当季价算的货款，不含运费。运费和最终费用等发出后确认。<br>
+      整盒的公母只数可以自己调，怎么配价格都一样。</div>
     </div>
 
     <div class="card">
@@ -164,6 +165,7 @@ button.go:disabled{opacity:.45}
   var specs = []   // 后端 /api/public/specs 的原样数据
   var qty = {}     // spec_id -> 几盒（非套餐是几只）
   var male = {}    // spec_id -> 每盒公的只数；没动过就没有这个键
+  var minQty = 0   // 起订只数，跟着价目表一起从后端拿，不在这儿写死
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -321,12 +323,29 @@ button.go:disabled{opacity:.45}
     if (minus) minus.disabled = off
   }
 
+  // 按盒的档要乘上一盒几只；按斤的档没法折算成只，整单就不显示只数也不卡起订
+  function crabCount() {
+    var n = 0
+    for (var i = 0; i < specs.length; i++) {
+      var s = specs[i]
+      var q = qty[s.id] || 0
+      if (!q) continue
+      if (s.unit === 'box') n += q * (s.pack_size || 0)
+      else if (s.unit === 'piece') n += q
+      else return -1
+    }
+    return n
+  }
+
   function total() {
     var sum = 0
     for (var i = 0; i < specs.length; i++) {
       sum += (qty[specs[i].id] || 0) * specs[i].unit_price
     }
     $('total').textContent = yuan(sum)
+
+    var n = crabCount()
+    $('count').textContent = n > 0 ? '· 共 ' + n + ' 只' : ''
   }
 
   function loadSpecs() {
@@ -336,7 +355,12 @@ button.go:disabled{opacity:.45}
         return
       }
       specs = body.data.list || []
+      minQty = body.data.min_quantity || 0
       renderSpecs()
+      // 起订量写在提示里，数字跟着后端走
+      if (minQty > 0) {
+        $('hint').innerHTML = $('hint').innerHTML + '<br>最少 ' + minQty + ' 只起。'
+      }
     })
   }
 
@@ -363,6 +387,11 @@ button.go:disabled{opacity:.45}
     var addr = $('addr').value.trim()
 
     if (!items.length) { fail('先选一下要哪一档'); return }
+    var n = crabCount()
+    if (minQty > 0 && n >= 0 && n < minQty) {
+      fail('最少 ' + minQty + ' 只起，现在只有 ' + n + ' 只')
+      return
+    }
     if (!name) { fail('收货人还没填'); return }
     if (!/^1[3-9]\d{9}$/.test(phone)) { fail('手机号看着不对，检查一下'); return }
     if (addr.length < 5) { fail('地址写详细一点，门牌号别漏'); return }

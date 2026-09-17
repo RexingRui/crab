@@ -9,6 +9,7 @@ import (
 
 	"crab-order/internal/auth"
 	"crab-order/internal/errs"
+	"crab-order/internal/service"
 )
 
 // regLink 让卖家签一条登记链接，返回 token。
@@ -276,6 +277,58 @@ func TestRegistrationMixesPacks(t *testing.T) {
 	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
 	if len(o.Items) != 2 {
 		t.Fatalf("该有两条明细，实际 %d", len(o.Items))
+	}
+}
+
+// TestRegistrationMinQuantity 起订只数：按只卖的档不够 5 只直接拒，够了就放行。
+// 套餐一盒 8 只，天然过线，所以这条要靠一个「按只」的档才测得出来。
+func TestRegistrationMinQuantity(t *testing.T) {
+	e := newTestEnv(t)
+
+	// 价目表里加一档按只卖的，pack_size=0
+	created := e.mustOK(t, http.MethodPost, "/api/specs", map[string]any{
+		"gender": "male", "spec_gram": 225, "spec_label": "4.5两", "unit": "piece", "unit_price": 8800,
+	})
+	var piece SpecDTO
+	if err := json.Unmarshal(created, &piece); err != nil {
+		t.Fatalf("解析规格失败: %v", err)
+	}
+
+	// 起订量跟着价目表一起下发，页面不用自己写死一个数字
+	status, resp, data := e.callWithToken(t, http.MethodGet, "/api/public/specs", nil, "")
+	if status != http.StatusOK || resp.Code != errs.CodeOK {
+		t.Fatalf("公开价目表失败: code=%d", resp.Code)
+	}
+	var meta struct {
+		MinQuantity int `json:"min_quantity"`
+	}
+	_ = json.Unmarshal(data, &meta)
+	if meta.MinQuantity != service.RegMinCrabs {
+		t.Fatalf("起订量没下发: %d", meta.MinQuantity)
+	}
+
+	// 4 只 → 不够
+	body := registerBody(e.regLink(t, ""), piece.ID, 4, "13900139020")
+	status, resp, _ = e.register(t, body)
+	if resp.Code != errs.CodeInvalidParam {
+		t.Fatalf("4 只该被拒: status=%d code=%d msg=%s", status, resp.Code, resp.Msg)
+	}
+
+	// 5 只 → 刚好放行
+	body = registerBody(e.regLink(t, ""), piece.ID, service.RegMinCrabs, "13900139021")
+	if _, resp, _ = e.register(t, body); resp.Code != errs.CodeOK {
+		t.Fatalf("%d 只该放行: code=%d msg=%s", service.RegMinCrabs, resp.Code, resp.Msg)
+	}
+}
+
+// TestRegistrationPackMeetsMinimum 一盒 8 只，只买一盒也过线。
+func TestRegistrationPackMeetsMinimum(t *testing.T) {
+	e := newTestEnv(t)
+	sp := e.publicSpecIDs(t)[0]
+
+	_, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, 1, "13900139022"))
+	if resp.Code != errs.CodeOK {
+		t.Fatalf("一盒 8 只该放行: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 }
 

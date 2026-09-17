@@ -61,6 +61,9 @@ type ItemInput struct {
 	Unit      model.Unit
 	Quantity  int
 	UnitPrice int64
+	// PackSize 一盒几只，只用来数「这单一共多少只」，不落库——
+	// 明细存的是快照，盒里装什么已经写在 SpecLabel 里了。
+	PackSize int
 }
 
 type CreateOrderInput struct {

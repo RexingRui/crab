@@ -23,6 +23,11 @@ const (
 	regMaxQuantity = 200
 	// regDedupWindow 手机号查重的时间窗口：一天内同号只收一次。
 	regDedupWindow = 24 * 60 * 60
+	// RegMinCrabs 买家自助登记的起订只数。
+	//
+	// 只卡买家这条路径：卖家在小程序里给熟客记一只也是正常业务，不受这条限制。
+	// 8 只装的套餐一盒就过线了，所以这条实际上是给「按只卖」的档兜底的。
+	RegMinCrabs = 5
 )
 
 // ErrDuplicateRegistration 同一手机号一天内重复登记。
@@ -88,6 +93,9 @@ func (s *OrderService) CreateRegistration(ctx context.Context, in RegistrationIn
 
 	items, err := s.resolveRegItems(ctx, in.Items)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := checkMinCrabs(items); err != nil {
 		return nil, false, err
 	}
 
@@ -169,9 +177,39 @@ func (s *OrderService) resolveRegItems(ctx context.Context, in []RegistrationIte
 			Unit:      sp.Unit,
 			Quantity:  it.Quantity,
 			UnitPrice: sp.UnitPrice,
+			PackSize:  sp.PackSize,
 		})
 	}
 	return out, nil
+}
+
+// countCrabs 数这批明细一共多少只。
+//
+// 按盒的档要乘上一盒几只；按只的档就是数量本身。按斤卖的档没法折算成只，
+// 所以不计入，也让整单跳过起订校验——论斤买本来就不论只。
+// 第二个返回值为 false 表示这单里有按斤的档，只数算不准。
+func countCrabs(items []ItemInput) (int, bool) {
+	n := 0
+	for _, it := range items {
+		switch it.Unit {
+		case model.UnitBox:
+			n += it.Quantity * it.PackSize
+		case model.UnitPiece:
+			n += it.Quantity
+		default:
+			return 0, false
+		}
+	}
+	return n, true
+}
+
+// checkMinCrabs 起订量校验。
+func checkMinCrabs(items []ItemInput) error {
+	n, countable := countCrabs(items)
+	if !countable || n >= RegMinCrabs {
+		return nil
+	}
+	return errs.InvalidParam("最少 %d 只起，现在只有 %d 只", RegMinCrabs, n)
 }
 
 // packLabel 把套餐的公母比例写进明细快照。

@@ -59,8 +59,10 @@ func (a *API) CreateRegLink(w http.ResponseWriter, r *http.Request) {
 
 // PublicSpecs GET /api/public/specs
 //
-// 买家登记页的规格与价格。只返回启用中的，且只给展示必需的字段：
+// 买家登记页的价目表。只返回启用中的，且只给展示必需的字段：
 // 不带 sort_no / updated_at 这类内部信息。
+//
+// 顺带把起订只数一并给出去，让页面不用自己写一份同样的数字。
 func (a *API) PublicSpecs(w http.ResponseWriter, r *http.Request) {
 	list, err := a.specs.List(r.Context(), true)
 	if err != nil {
@@ -71,7 +73,11 @@ func (a *API) PublicSpecs(w http.ResponseWriter, r *http.Request) {
 	for _, s := range list {
 		out = append(out, ToPublicSpecDTO(s))
 	}
-	OK(w, map[string]any{"list": out, "total": len(out)})
+	OK(w, map[string]any{
+		"list":         out,
+		"total":        len(out),
+		"min_quantity": service.RegMinCrabs,
+	})
 }
 
 type regItemReq struct {
