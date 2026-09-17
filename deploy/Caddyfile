@@ -26,6 +26,15 @@
 		}
 	}
 
+	# 买家自助登记页：同样是单个静态 HTML，/r?t=xxx 要命中，所以用 /r* 并重写。
+	handle /r* {
+		header X-Robots-Tag noindex
+		rewrite * /index.html
+		file_server {
+			root /srv/register
+		}
+	}
+
 	# 其余路径不对外暴露任何东西（/healthz 也不放出去，容器自己会自检）
 	handle {
 		respond "Not Found" 404

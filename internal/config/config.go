@@ -30,8 +30,13 @@ type Config struct {
 	AuthTokenTTL time.Duration
 	AdminOpenIDs []string
 
-	Timezone        string
-	PublicRateLimit int
+	// RegLinkTTL 买家登记链接的有效期。链接是无状态 token，发出去撤不回，
+	// 只能靠有效期兜底，别设太长。
+	RegLinkTTL time.Duration
+
+	Timezone             string
+	PublicRateLimit      int
+	PublicWriteRateLimit int
 }
 
 // IsDev 仅在开发环境开启 CORS 等便利功能。
@@ -61,16 +66,17 @@ func Load(envFile string) (*Config, error) {
 	}
 
 	c := &Config{
-		Env:             getEnv("ENV", EnvProd),
-		HTTPAddr:        getEnv("HTTP_ADDR", ":8080"),
-		LogLevel:        getEnv("LOG_LEVEL", "info"),
-		DBPath:          getEnv("DB_PATH", "./data/crab.db"),
-		WechatAppID:     getEnv("WECHAT_APPID", ""),
-		WechatSecret:    getEnv("WECHAT_SECRET", ""),
-		AuthSecret:      getEnv("AUTH_SECRET", ""),
-		AdminOpenIDs:    splitAndTrim(getEnv("ADMIN_OPENIDS", "")),
-		Timezone:        getEnv("TIMEZONE", "Asia/Shanghai"),
-		PublicRateLimit: getEnvInt("PUBLIC_RATE_LIMIT", 20),
+		Env:                  getEnv("ENV", EnvProd),
+		HTTPAddr:             getEnv("HTTP_ADDR", ":8080"),
+		LogLevel:             getEnv("LOG_LEVEL", "info"),
+		DBPath:               getEnv("DB_PATH", "./data/crab.db"),
+		WechatAppID:          getEnv("WECHAT_APPID", ""),
+		WechatSecret:         getEnv("WECHAT_SECRET", ""),
+		AuthSecret:           getEnv("AUTH_SECRET", ""),
+		AdminOpenIDs:         splitAndTrim(getEnv("ADMIN_OPENIDS", "")),
+		Timezone:             getEnv("TIMEZONE", "Asia/Shanghai"),
+		PublicRateLimit:      getEnvInt("PUBLIC_RATE_LIMIT", 20),
+		PublicWriteRateLimit: getEnvInt("PUBLIC_WRITE_RATE_LIMIT", 5),
 	}
 
 	ttl, err := time.ParseDuration(getEnv("AUTH_TOKEN_TTL", "720h"))
@@ -78,6 +84,12 @@ func Load(envFile string) (*Config, error) {
 		return nil, fmt.Errorf("AUTH_TOKEN_TTL 格式非法（示例 720h）: %w", err)
 	}
 	c.AuthTokenTTL = ttl
+
+	regTTL, err := time.ParseDuration(getEnv("REG_LINK_TTL", "168h"))
+	if err != nil {
+		return nil, fmt.Errorf("REG_LINK_TTL 格式非法（示例 168h）: %w", err)
+	}
+	c.RegLinkTTL = regTTL
 
 	if err := c.validate(); err != nil {
 		return nil, err
@@ -98,6 +110,12 @@ func (c *Config) validate() error {
 	}
 	if c.PublicRateLimit <= 0 {
 		return errors.New("PUBLIC_RATE_LIMIT 必须大于 0")
+	}
+	if c.PublicWriteRateLimit <= 0 {
+		return errors.New("PUBLIC_WRITE_RATE_LIMIT 必须大于 0")
+	}
+	if c.RegLinkTTL <= 0 {
+		return errors.New("REG_LINK_TTL 必须大于 0")
 	}
 	if c.DBPath == "" {
 		return errors.New("DB_PATH 不能为空")

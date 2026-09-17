@@ -92,3 +92,85 @@ func TestVerifyWrongSecret(t *testing.T) {
 		t.Error("换密钥后应当校验失败")
 	}
 }
+
+// ---------- 登记链接 token ----------
+
+// TestRegSignerIssueVerify 签发的登记链接能验过，jti 每条都不一样。
+func TestRegSignerIssueVerify(t *testing.T) {
+	s := NewRegSigner(testSecret, time.Hour)
+	now := time.Now()
+
+	tk, claims, err := s.Issue("oSeller", "老张", now)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	got, err := s.Verify(tk, now)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if got.JTI != claims.JTI || got.Issuer != "oSeller" || got.Remark != "老张" {
+		t.Fatalf("claims 对不上: %+v", got)
+	}
+
+	// jti 是一次性标识，两条链接不能撞。撞了就等于两个买家共用一个幂等键。
+	_, other, err := s.Issue("oSeller", "", now)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if other.JTI == claims.JTI {
+		t.Fatal("两条链接的 jti 重复了")
+	}
+}
+
+// TestRegSignerExpired 过期的链接验不过。
+func TestRegSignerExpired(t *testing.T) {
+	s := NewRegSigner(testSecret, time.Hour)
+	now := time.Now()
+	tk, _, err := s.Issue("oSeller", "", now)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if _, err := s.Verify(tk, now.Add(2*time.Hour)); err == nil {
+		t.Fatal("过期的链接被放行了")
+	}
+}
+
+// TestRegSignerTampered 改一个字节就验不过。
+func TestRegSignerTampered(t *testing.T) {
+	s := NewRegSigner(testSecret, time.Hour)
+	now := time.Now()
+	tk, _, err := s.Issue("oSeller", "", now)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	for _, bad := range []string{tk + "x", strings.Replace(tk, ".", ".x", 1), "", "abc"} {
+		if _, err := s.Verify(bad, now); err == nil {
+			t.Fatalf("被改过的 token 验过了: %q", bad)
+		}
+	}
+}
+
+// TestTokenDomainsAreSeparate 两种 token 互相当不了对方用。
+// 签名前给登记链接加了 "reg." 域前缀，就是为了这个：
+// 卖家的登录 token 一旦泄露，也不该顺手变成一条能建单的登记链接。
+func TestTokenDomainsAreSeparate(t *testing.T) {
+	now := time.Now()
+	login := NewSigner(testSecret, time.Hour)
+	reg := NewRegSigner(testSecret, time.Hour)
+
+	loginToken, _, err := login.Issue("oSeller", now)
+	if err != nil {
+		t.Fatalf("issue login: %v", err)
+	}
+	if _, err := reg.Verify(loginToken, now); err == nil {
+		t.Fatal("登录 token 被当成登记链接放行了")
+	}
+
+	regToken, _, err := reg.Issue("oSeller", "", now)
+	if err != nil {
+		t.Fatalf("issue reg: %v", err)
+	}
+	if _, err := login.Verify(regToken, now); err == nil {
+		t.Fatal("登记链接被当成登录 token 放行了")
+	}
+}

@@ -14,7 +14,14 @@ export default function OrderCard({ order, onClick, onShip, showShipButton }) {
   return (
     <View className={`order-card order-card--bar-${tone}`} onClick={() => onClick && onClick(order)}>
       <View className='order-card__top'>
-        <Text className='order-card__name'>{order.receiver_name}</Text>
+        <View className='order-card__who'>
+          <Text className='order-card__name'>{order.receiver_name}</Text>
+          {/* 买家自己填的单要核对一遍再发，但这只是个出处，不是待办：
+              用灰字而不是彩色标签，别去抢「待发货」那点颜色 */}
+          {order.source === 'web' ? (
+            <Text className='order-card__src'>买家登记</Text>
+          ) : null}
+        </View>
         <View className='order-card__tags'>
           {overdue > 0 ? (
             <Text className='order-card__overdue'>超期{overdue}天</Text>

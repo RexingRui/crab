@@ -75,7 +75,9 @@ type CreateOrderInput struct {
 	Discount       int64
 	ExpectShipDate string
 	Remark         string
-	Operator       string
+	// Source 订单来源，空串按 manual 处理。买家自助登记走 CreateRegistration 传 web。
+	Source   model.Source
+	Operator string
 }
 
 type UpdateOrderInput struct {
@@ -223,6 +225,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, in CreateOrderInput) (*m
 		PayStatus:      model.PayUnpaid,
 		ExpectShipDate: in.ExpectShipDate,
 		Remark:         in.Remark,
+		Source:         in.Source,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 		Items:          items,

@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS orders (
     settled_time      INTEGER,                          -- 付清时间
 
     remark            TEXT    NOT NULL DEFAULT '',
+    source            TEXT    NOT NULL DEFAULT 'manual',  -- manual=卖家录入 / web=买家自助登记
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     deleted_at        INTEGER

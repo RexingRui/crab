@@ -57,14 +57,16 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 
 	cfg := &config.Config{
-		Env:             config.EnvDev,
-		HTTPAddr:        ":0",
-		DBPath:          "test",
-		AuthSecret:      testSecret,
-		AuthTokenTTL:    time.Hour,
-		AdminOpenIDs:    []string{testAdminID},
-		Timezone:        "Asia/Shanghai",
-		PublicRateLimit: 20,
+		Env:                  config.EnvDev,
+		HTTPAddr:             ":0",
+		DBPath:               "test",
+		AuthSecret:           testSecret,
+		AuthTokenTTL:         time.Hour,
+		AdminOpenIDs:         []string{testAdminID},
+		RegLinkTTL:           time.Hour,
+		Timezone:             "Asia/Shanghai",
+		PublicRateLimit:      20,
+		PublicWriteRateLimit: 20,
 	}
 	signer := auth.NewSigner(cfg.AuthSecret, cfg.AuthTokenTTL)
 	a := New(cfg, st, signer, wechat.NewClient("wxtest", "secret"))

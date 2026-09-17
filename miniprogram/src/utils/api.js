@@ -41,7 +41,11 @@ export const api = {
   disableSpec: (id) => del(`/api/specs/${id}`),
 
   // 地址簿，从历史订单聚合
-  addresses: (keyword, limit = 20) => get('/api/addresses', { keyword, limit })
+  addresses: (keyword, limit = 20) => get('/api/addresses', { keyword, limit }),
+
+  // 买家自助登记：签一条链接发给买家。remark 是先写好的备注名，买家改不了。
+  // 返回 { token, path, expires_at }，域名在前端拼（和查单页共用一个）。
+  createRegLink: (remark) => post('/api/reg-links', { remark })
 }
 
 export default api

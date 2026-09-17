@@ -25,16 +25,21 @@ const SHIP_OPTIONS = [
 const PAY_OPTIONS = [
   ['', '不限'], ['unpaid', '未收款'], ['partial', '收了定金'], ['paid', '已收清']
 ]
+const SOURCE_OPTIONS = [
+  ['', '不限'], ['web', '买家登记'], ['manual', '自己录的']
+]
+
+const EMPTY_FILTERS = { ship_status: '', pay_status: '', source: '' }
 
 export default function Orders() {
   const [keyword, setKeyword] = useState('')
-  const [filters, setFilters] = useState({ ship_status: '', pay_status: '' })
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [list, setList] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
-  const [draft, setDraft] = useState({ ship_status: '', pay_status: '' })
+  const [draft, setDraft] = useState(EMPTY_FILTERS)
 
   const debounceTimer = useRef(null)
   const requestSeq = useRef(0)
@@ -44,7 +49,11 @@ export default function Orders() {
   useEffect(() => {
     const apply = (params = {}) => {
       setKeyword('')
-      setFilters({ ship_status: params.ship_status || '', pay_status: params.pay_status || '' })
+      setFilters({
+        ship_status: params.ship_status || '',
+        pay_status: params.pay_status || '',
+        source: params.source || ''
+      })
     }
     Taro.eventCenter.on('orders:filter', apply)
     return () => Taro.eventCenter.off('orders:filter', apply)
@@ -100,7 +109,7 @@ export default function Orders() {
     }))
   }
 
-  const isAll = !filters.ship_status && !filters.pay_status
+  const isAll = !filters.ship_status && !filters.pay_status && !filters.source
 
   // 按创建日期分组，组标题吸顶
   const groups = useMemo(() => {
@@ -150,7 +159,7 @@ export default function Orders() {
         ))}
         <Text
           className={`orders__chip ${isAll ? 'orders__chip--on' : ''}`}
-          onClick={() => setFilters({ ship_status: '', pay_status: '' })}
+          onClick={() => setFilters(EMPTY_FILTERS)}
         >
           全部
         </Text>
@@ -189,7 +198,7 @@ export default function Orders() {
           <>
             <View
               className='btn btn--ghost'
-              onClick={() => { setDraft({ ship_status: '', pay_status: '' }) }}
+              onClick={() => { setDraft(EMPTY_FILTERS) }}
             >
               清空
             </View>
@@ -213,6 +222,12 @@ export default function Orders() {
           options={PAY_OPTIONS}
           value={draft.pay_status}
           onPick={(v) => setDraft((d) => ({ ...d, pay_status: v }))}
+        />
+        <OptionRow
+          title='来源'
+          options={SOURCE_OPTIONS}
+          value={draft.source}
+          onPick={(v) => setDraft((d) => ({ ...d, source: v }))}
         />
       </Sheet>
     </View>

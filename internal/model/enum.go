@@ -207,3 +207,32 @@ const (
 	ActionDelete  = "delete"
 	ActionRevert  = "revert"
 )
+
+// ========== 订单来源 ==========
+
+// Source 标记这笔单是怎么进来的。买家自助登记的单不该和卖家自己录的单
+// 在统计里混作一谈，也需要在列表里单独筛出来核对。
+type Source string
+
+const (
+	SourceManual Source = "manual" // 卖家在小程序里录的
+	SourceWeb    Source = "web"    // 买家用登记链接自助填的
+)
+
+func (s Source) Valid() bool {
+	switch s {
+	case SourceManual, SourceWeb:
+		return true
+	}
+	return false
+}
+
+func (s Source) Text() string {
+	switch s {
+	case SourceManual:
+		return "卖家录入"
+	case SourceWeb:
+		return "买家登记"
+	}
+	return string(s)
+}

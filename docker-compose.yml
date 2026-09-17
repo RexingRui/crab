@@ -47,7 +47,7 @@ services:
         max-size: "10m"
         max-file: "5"
 
-  # 可选的反代：自动申请并续期 HTTPS 证书，同时托管买家查单页 /t。
+  # 可选的反代：自动申请并续期 HTTPS 证书，同时托管买家查单页 /t 与登记页 /r。
   # 默认不启动（profiles），宿主机上已经有 Nginx / Caddy 的话不用它。
   #   docker compose --profile proxy up -d
   caddy:
@@ -66,7 +66,8 @@ services:
       CRAB_DOMAIN: ${CRAB_DOMAIN:-}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./web/track:/srv/track:ro   # 买家查单页，静态文件
+      - ./web/track:/srv/track:ro         # 买家查单页，静态文件
+      - ./web/register:/srv/register:ro   # 买家自助登记页，静态文件
       - caddy-data:/data            # 证书，删了要重新签，注意 ACME 频率限制
       - caddy-config:/config
     logging:

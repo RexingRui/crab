@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"crab-order/internal/auth"
 	"crab-order/internal/config"
@@ -19,20 +20,40 @@ type API struct {
 	specs     *service.SpecService
 	addresses *service.AddressService
 	signer    *auth.Signer
+	regSigner *auth.RegSigner
 	wechat    *wechat.Client
 	limiter   *RateLimiter
+	// writeLimiter 单独管公开写接口（买家登记）。读一次查单和写一笔订单的代价差得远，
+	// 不该共用一个配额。
+	writeLimiter *RateLimiter
 }
 
+// 配置缺省兜底：零值会让限流器把所有人都挡在外面、让登记链接一签发就过期。
+const (
+	defaultPublicWriteRateLimit = 5
+	defaultRegLinkTTL           = 168 * time.Hour
+)
+
 func New(cfg *config.Config, st store.Store, signer *auth.Signer, wx *wechat.Client) *API {
+	writeLimit := cfg.PublicWriteRateLimit
+	if writeLimit <= 0 {
+		writeLimit = defaultPublicWriteRateLimit
+	}
+	regTTL := cfg.RegLinkTTL
+	if regTTL <= 0 {
+		regTTL = defaultRegLinkTTL
+	}
 	return &API{
-		cfg:       cfg,
-		orders:    service.NewOrderService(st),
-		stats:     service.NewStatsService(st),
-		specs:     service.NewSpecService(st),
-		addresses: service.NewAddressService(st),
-		signer:    signer,
-		wechat:    wx,
-		limiter:   NewRateLimiter(cfg.PublicRateLimit),
+		cfg:          cfg,
+		orders:       service.NewOrderService(st),
+		stats:        service.NewStatsService(st),
+		specs:        service.NewSpecService(st),
+		addresses:    service.NewAddressService(st),
+		signer:       signer,
+		regSigner:    auth.NewRegSigner(cfg.AuthSecret, regTTL),
+		wechat:       wx,
+		limiter:      NewRateLimiter(cfg.PublicRateLimit),
+		writeLimiter: NewRateLimiter(writeLimit),
 	}
 }
 
@@ -43,6 +64,9 @@ func (a *API) Orders() *service.OrderService { return a.orders }
 func (a *API) Close() {
 	if a.limiter != nil {
 		a.limiter.Close()
+	}
+	if a.writeLimiter != nil {
+		a.writeLimiter.Close()
 	}
 }
 
@@ -89,8 +113,15 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/specs/{id}", a.UpdateSpec)
 	mux.HandleFunc("DELETE /api/specs/{id}", a.DisableSpec)
 
+	// 买家自助登记：卖家签链接
+	mux.HandleFunc("POST /api/reg-links", a.CreateRegLink)
+
 	// 买家免登录查单
 	mux.HandleFunc("GET /api/public/orders", a.PublicQueryOrder)
+
+	// 买家免登录登记（凭链接里的 token）
+	mux.HandleFunc("GET /api/public/specs", a.PublicSpecs)
+	mux.HandleFunc("POST /api/public/registrations", a.PublicRegister)
 
 	// 兜底：未命中的路径也返回统一 JSON，而不是标准库的纯文本 404。
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +133,6 @@ func (a *API) Handler() http.Handler {
 	if a.cfg.IsDev() {
 		ms = append(ms, CORS)
 	}
-	ms = append(ms, RateLimit(a.limiter), Auth(a.signer, a.cfg))
+	ms = append(ms, RateLimit(a.limiter, a.writeLimiter), Auth(a.signer, a.cfg))
 	return Chain(mux, ms...)
 }

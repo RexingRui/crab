@@ -34,7 +34,9 @@ type Order struct {
 	FirstPayTime   *int64
 	SettledTime    *int64
 
-	Remark    string
+	Remark string
+	// Source 订单来源，空串按 manual 处理（老数据没有这一列）。
+	Source    Source
 	CreatedAt int64
 	UpdatedAt int64
 	DeletedAt *int64
@@ -135,6 +137,7 @@ const (
 type OrderFilter struct {
 	ShipStatus          []ShipStatus
 	PayStatus           []PayStatus
+	Source              Source
 	Keyword             string
 	ExpectShipDate      string
 	ExpectShipDateStart string

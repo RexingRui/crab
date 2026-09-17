@@ -170,6 +170,10 @@ export default function Detail() {
           />
           {overdue > 0 ? <Text className='detail__overdue'>超期{overdue}天</Text> : null}
         </View>
+        {/* 买家自己填的单：运费还没加、价格也没跟人确认过，编辑一遍再发 */}
+        {order.source === 'web' ? (
+          <Text className='detail__src'>买家自己登记的，运费和金额记得确认</Text>
+        ) : null}
       </View>
 
       <View className='section card'>

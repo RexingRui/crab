@@ -5,7 +5,7 @@
 .gitignore
 .github
 
-# 前端不进后端镜像（买家查单页由反代挂载，见 docker-compose.yml）
+# 前端不进后端镜像（买家查单页与登记页由反代挂载，见 docker-compose.yml）
 miniprogram/
 web/
 node_modules/

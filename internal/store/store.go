@@ -22,6 +22,9 @@ type Queries interface {
 	GetOrderByRequestID(ctx context.Context, requestID string) (*model.Order, error)
 	// ListOrders 返回一页订单与符合条件的总数。f.PageSize <= 0 表示不分页（导出用）。
 	ListOrders(ctx context.Context, f model.OrderFilter) ([]*model.Order, int, error)
+	// CountOrdersByPhoneSince 统计某手机号在 since 之后（含）创建的未删除订单数，
+	// 供买家自助登记做「同一个号一天内重复提交」的拦截。
+	CountOrdersByPhoneSince(ctx context.Context, phone string, since int64) (int, error)
 	SoftDeleteOrder(ctx context.Context, id, now int64) error
 
 	// ---------- 明细 ----------
