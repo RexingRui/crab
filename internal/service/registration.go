@@ -23,10 +23,10 @@ const (
 	regMaxQuantity = 200
 	// regDedupWindow 手机号查重的时间窗口：一天内同号只收一次。
 	regDedupWindow = 24 * 60 * 60
-	// RegMinCrabs 买家自助登记的起订只数。
+	// RegMinCrabs 买家自助登记的起订只数，卡的是**整单**不是每档。
 	//
-	// 只卡买家这条路径：卖家在小程序里给熟客记一只也是正常业务，不受这条限制。
-	// 8 只装的套餐一盒就过线了，所以这条实际上是给「按只卖」的档兜底的。
+	// 只卡买家这条路径：卖家给熟客记一只也是正常业务，录单接口不受这条限制。
+	// 整盒买天然过线（一盒 8 只），所以它实际只在按只挑的时候起作用。
 	RegMinCrabs = 5
 )
 
@@ -96,6 +96,9 @@ func (s *OrderService) CreateRegistration(ctx context.Context, in RegistrationIn
 
 	items, err := s.resolveRegItems(ctx, in.Items)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := checkMinCrabs(items); err != nil {
 		return nil, false, err
 	}
 
@@ -175,6 +178,37 @@ func (s *OrderService) resolveRegItems(ctx context.Context, in []RegistrationIte
 	return out, nil
 }
 
+// countCrabs 数这批明细一共多少只。
+//
+// 按盒的条要乘上一盒几只；按只的条就是数量本身。按斤的档折不出只数，
+// 第二个返回值为 false，整单跳过起订校验——论斤买本来就不论只。
+func countCrabs(items []ItemInput) (int, bool) {
+	n := 0
+	for _, it := range items {
+		switch it.Unit {
+		case model.UnitBox:
+			n += it.Quantity * it.PackSize
+		case model.UnitPiece:
+			n += it.Quantity
+		default:
+			return 0, false
+		}
+	}
+	return n, true
+}
+
+// checkMinCrabs 起订量：**整单**至少 RegMinCrabs 只，不是每档。
+//
+// 逐档卡会把「这档挑 1 只、那档挑 4 只」这种正常搭配挡住，而它本来就够 5 只。
+// 整盒买天然过线（一盒 8 只），所以这条实际只在按只挑的时候起作用。
+func checkMinCrabs(items []ItemInput) error {
+	n, countable := countCrabs(items)
+	if !countable || n >= RegMinCrabs {
+		return nil
+	}
+	return errs.InvalidParam("一共 %d 只起，现在只有 %d 只", RegMinCrabs, n)
+}
+
 // LoosePrice 散买一只多少钱：整盒价按盒里的只数摊开，**向上取整到元**。
 //
 // 189 / 8 = 23.625 → 24 元。取到元而不是到分，一来报价好说出口，二来天然保证
@@ -190,9 +224,9 @@ func LoosePrice(sp model.Spec) int64 {
 
 // splitPack 把「这一档要 n 只」拆成整盒 + 散只两条明细。
 //
-// 整盒部分走套餐价，凑不满一盒的零头走散买价。零头不是 0 就必须够起订量——
-// 「最低 5 只」只管这种不按整盒买的情况，整盒买多少都行。
-// 不是套餐的档没有「整盒」，整条按它自己的单价走，同样受起订量约束。
+// 整盒部分走套餐价，凑不满一盒的零头走散买价。
+// 起订量不在这儿管：买家可以一档挑 1 只、另一档挑 4 只凑够 5 只，
+// 逐档卡就把这种正常的搭配挡住了。见 checkMinCrabs。
 func splitPack(sp model.Spec, n int, maleCount *int, idx int) ([]ItemInput, error) {
 	male := n / 2 // 买家没动过就是默认的一半一半
 	if maleCount != nil {
@@ -212,29 +246,17 @@ func splitPack(sp model.Spec, n int, maleCount *int, idx int) ([]ItemInput, erro
 	}
 
 	if !sp.IsPack() {
-		// 按斤卖的档不论只，起订量与公母比例都不适用
-		if sp.Unit != model.UnitPiece {
-			row := base
-			row.Quantity = n
-			return []ItemInput{row}, nil
-		}
-		if n < RegMinCrabs {
-			return nil, errs.InvalidParam("「%s」最少 %d 只起，现在只有 %d 只", sp.SpecLabel, RegMinCrabs, n)
-		}
 		row := base
 		row.Quantity = n
-		row.SpecLabel = withRatio(sp.SpecLabel, male, n-male)
+		// 按斤卖的档不论只，公母比例不适用
+		if sp.Unit == model.UnitPiece {
+			row.SpecLabel = withRatio(sp.SpecLabel, male, n-male)
+		}
 		return []ItemInput{row}, nil
 	}
 
 	boxes := n / sp.PackSize
 	loose := n % sp.PackSize
-	if loose > 0 && loose < RegMinCrabs {
-		// 顺手把最近的两个合法只数算给买家，省得他自己试
-		return nil, errs.InvalidParam("「%s」散买最少 %d 只起：%d 只里有 %d 只凑不满一盒，改成 %d 只或 %d 只",
-			sp.SpecLabel, RegMinCrabs, n, loose, boxes*sp.PackSize, boxes*sp.PackSize+RegMinCrabs)
-	}
-
 	boxCrabs := boxes * sp.PackSize
 	maleInBox := splitMale(male, n, boxCrabs, loose)
 

@@ -76,8 +76,8 @@ func (a *API) PublicSpecs(w http.ResponseWriter, r *http.Request) {
 	OK(w, map[string]any{
 		"list":  out,
 		"total": len(out),
-		// 散买的起订只数。整盒买不受这条限制，页面据此校验零头。
-		"min_loose": service.RegMinCrabs,
+		// 整单的起订只数。整盒买天然过线，页面据此校验「按只挑」那一档。
+		"min_quantity": service.RegMinCrabs,
 	})
 }
 

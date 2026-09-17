@@ -317,21 +317,56 @@ func TestRegistrationSplitsLoose(t *testing.T) {
 	}
 }
 
-// TestRegistrationRejectsShortRemainder 零头不够起订量要拒，并把最近的合法只数说给买家。
-func TestRegistrationRejectsShortRemainder(t *testing.T) {
+// TestRegistrationMinIsWholeOrder 起订量卡整单：跨档凑够 5 只要放行，一共不够才拒。
+func TestRegistrationMinIsWholeOrder(t *testing.T) {
+	e := newTestEnv(t)
+	specs := e.publicSpecIDs(t)
+
+	// 第一档 1 只 + 第二档 4 只 = 5 只
+	body := registerBody(e.regLink(t, ""), specs[0].ID, 1, "13900139031")
+	body["items"] = []map[string]any{
+		{"spec_id": specs[0].ID, "quantity": 1},
+		{"spec_id": specs[1].ID, "quantity": 4},
+	}
+	_, resp, data := e.register(t, body)
+	if resp.Code != errs.CodeOK {
+		t.Fatalf("跨档凑够 5 只该放行: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	var reg RegistrationDTO
+	_ = json.Unmarshal(data, &reg)
+	if want := specs[0].LoosePrice + 4*specs[1].LoosePrice; reg.PayableAmount != want {
+		t.Fatalf("金额算错: got=%d want=%d", reg.PayableAmount, want)
+	}
+
+	// 一共 4 只 → 拒，提示里要说清还差多少
+	body = registerBody(e.regLink(t, ""), specs[0].ID, 1, "13900139032")
+	body["items"] = []map[string]any{
+		{"spec_id": specs[0].ID, "quantity": 1},
+		{"spec_id": specs[1].ID, "quantity": 3},
+	}
+	status, resp, _ := e.register(t, body)
+	if resp.Code != errs.CodeInvalidParam {
+		t.Fatalf("一共 4 只该被拒: status=%d code=%d", status, resp.Code)
+	}
+	if !strings.Contains(resp.Msg, "4") {
+		t.Fatalf("提示里该说清现在有几只: %s", resp.Msg)
+	}
+}
+
+// TestRegistrationLooseWithBox 一档挑 9 只：1 盒按套餐价 + 1 只按散买价，不再被零头拦下。
+func TestRegistrationLooseWithBox(t *testing.T) {
 	e := newTestEnv(t)
 	sp := e.publicSpecIDs(t)[0]
 
-	// 一盒零 1 只
-	body := registerBody(e.regLink(t, ""), sp.ID, sp.PackSize+1, "13900139031")
-	status, resp, _ := e.register(t, body)
-	if resp.Code != errs.CodeInvalidParam {
-		t.Fatalf("零头 1 只该被拒: status=%d code=%d", status, resp.Code)
+	n := sp.PackSize + 1
+	_, resp, data := e.register(t, registerBody(e.regLink(t, ""), sp.ID, n, "13900139033"))
+	if resp.Code != errs.CodeOK {
+		t.Fatalf("%d 只该放行: code=%d msg=%s", n, resp.Code, resp.Msg)
 	}
-	// 提示里要给出改成几只，不能只说「不行」
-	if !strings.Contains(resp.Msg, itoa(int64(sp.PackSize))) ||
-		!strings.Contains(resp.Msg, itoa(int64(sp.PackSize+service.RegMinCrabs))) {
-		t.Fatalf("提示没给出可选只数: %s", resp.Msg)
+	var reg RegistrationDTO
+	_ = json.Unmarshal(data, &reg)
+	if want := sp.UnitPrice + sp.LoosePrice; reg.PayableAmount != want {
+		t.Fatalf("整盒 + 1 只散的金额算错: got=%d want=%d", reg.PayableAmount, want)
 	}
 }
 
@@ -370,14 +405,14 @@ func TestRegistrationMinQuantity(t *testing.T) {
 		t.Fatalf("公开价目表失败: code=%d", resp.Code)
 	}
 	var meta struct {
-		MinLoose int `json:"min_loose"`
+		MinQuantity int `json:"min_quantity"`
 	}
 	_ = json.Unmarshal(data, &meta)
-	if meta.MinLoose != service.RegMinCrabs {
-		t.Fatalf("散买起订量没下发: %d", meta.MinLoose)
+	if meta.MinQuantity != service.RegMinCrabs {
+		t.Fatalf("起订量没下发: %d", meta.MinQuantity)
 	}
 
-	// 4 只 → 不够
+	// 一共 4 只 → 不够
 	body := registerBody(e.regLink(t, ""), piece.ID, 4, "13900139020")
 	status, resp, _ = e.register(t, body)
 	if resp.Code != errs.CodeInvalidParam {
