@@ -26,7 +26,7 @@ UPDATE specs SET enabled = 0, updated_at = strftime('%s', 'now') WHERE enabled =
 INSERT INTO specs (gender, spec_gram, spec_label, unit, unit_price, pack_size, enabled, sort_no, updated_at)
 VALUES
     ('mixed', 1200, '8只装 母2.5两/公3.5两',      'box', 18900, 8, 1, 1, strftime('%s', 'now')),
-    ('mixed', 1400, '甄选 8只装 母3.0两/公4.0两', 'box', 26900, 8, 1, 2, strftime('%s', 'now')),
+    ('mixed', 1400, '8只装 母3.0两/公4.0两',      'box', 26900, 8, 1, 2, strftime('%s', 'now')),
     ('mixed', 1600, '8只装 母3.5两/公4.5两',      'box', 35900, 8, 1, 3, strftime('%s', 'now')),
     ('mixed', 1800, '8只装 母4.0两/公5.0两',      'box', 43900, 8, 1, 4, strftime('%s', 'now'))
 ON CONFLICT(gender, spec_gram, unit) DO UPDATE SET

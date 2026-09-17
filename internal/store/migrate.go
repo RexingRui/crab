@@ -59,7 +59,7 @@ func (s *SQLiteStore) hasColumn(ctx context.Context, table, column string) (bool
 // 把旧的档停用、把新的档加上。
 var seedSpecs = []model.Spec{
 	{SpecLabel: "8只装 母2.5两/公3.5两", SpecGram: 1200, UnitPrice: 18900, PackSize: 8, SortNo: 1},
-	{SpecLabel: "甄选 8只装 母3.0两/公4.0两", SpecGram: 1400, UnitPrice: 26900, PackSize: 8, SortNo: 2},
+	{SpecLabel: "8只装 母3.0两/公4.0两", SpecGram: 1400, UnitPrice: 26900, PackSize: 8, SortNo: 2},
 	{SpecLabel: "8只装 母3.5两/公4.5两", SpecGram: 1600, UnitPrice: 35900, PackSize: 8, SortNo: 3},
 	{SpecLabel: "8只装 母4.0两/公5.0两", SpecGram: 1800, UnitPrice: 43900, PackSize: 8, SortNo: 4},
 }

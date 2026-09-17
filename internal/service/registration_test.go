@@ -112,7 +112,7 @@ func TestCheckMinCrabs(t *testing.T) {
 	}
 	other := pack()
 	other.SpecGram = 1400
-	other.SpecLabel = "甄选 8只装 母3.0两/公4.0两"
+	other.SpecLabel = "8只装 母3.0两/公4.0两"
 	other.UnitPrice = 26900
 	b, err := splitPack(other, 4, nil, 1)
 	if err != nil {

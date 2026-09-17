@@ -92,9 +92,16 @@ input[type=tel],input[type=date]{font-variant-numeric:tabular-nums}
 .step--sm button{width:30px;height:30px;font-size:17px}
 .step--sm .n{width:28px;font-size:15px}
 
+/* 两类选的东西合在一张单里，各自一行摆出来——
+   不然你在「自由搭配」页签上看不见套餐那边选了什么，只看到合计莫名多出几百块 */
+.bd{display:flex;justify-content:space-between;gap:12px;font-size:13px;margin-top:10px}
+.bd:first-child{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.bd .k{flex:1;min-width:0;color:var(--muted)}
+.bd .v{font-variant-numeric:tabular-nums}
+
 .sum{
   display:flex;justify-content:space-between;align-items:baseline;
-  margin-top:16px;padding-top:16px;border-top:1px solid var(--line);
+  margin-top:12px;padding-top:12px;border-top:1px solid var(--line);
 }
 .sum .k{font-size:13px;color:var(--muted)}
 .sum .cnt{font-variant-numeric:tabular-nums}
@@ -157,14 +164,7 @@ button.go:disabled{opacity:.45}
             <button type="button" id="boxPlus" aria-label="多一盒">+</button>
           </div>
         </div>
-        <div class="line-row">
-          <span class="lab sub">每盒 公 <b id="maleNum">4</b> 只 · 母 <b id="femaleNum">4</b> 只</span>
-          <div class="step step--sm">
-            <button type="button" id="maleMinus" aria-label="少一只公">−</button>
-            <span class="n" id="maleVal">4</span>
-            <button type="button" id="malePlus" aria-label="多一只公">+</button>
-          </div>
-        </div>
+        <div class="hint" style="margin-top:10px">整盒默认公母各一半。想自己配比例，去「自由搭配」按只挑，同一档凑满一盒照样按整盒价算。</div>
       </div>
 
       <div class="pane" id="paneFree">
@@ -172,6 +172,7 @@ button.go:disabled{opacity:.45}
         <div id="picks"></div>
       </div>
 
+      <div id="breakdown"></div>
       <div class="sum">
         <span class="k">货款合计 <span class="cnt" id="count"></span></span>
         <span class="v" id="total">¥0.00</span>
@@ -230,8 +231,7 @@ button.go:disabled{opacity:.45}
   var specs = []    // 后端 /api/public/specs 的原样数据
   var tab = 'pack'  // pack=按套餐 / free=自由搭配，两类之间单选
   var picked = null // 按套餐选中的那一档
-  var boxes = 1     // 要几盒
-  var male = null   // 每盒公几只；null 表示没动过，用一半一半
+  var boxes = 1     // 按套餐要几盒
   var free = {}     // 自由搭配：spec_id -> {f: 母几只, m: 公几只}
   var minQty = 0    // 整单起订只数，跟着价目表一起从后端拿，不在这儿写死
 
@@ -327,34 +327,18 @@ button.go:disabled{opacity:.45}
     for (var k = 0; k < btns.length; k++) {
       btns[k].addEventListener('click', function () {
         picked = this.getAttribute('data-id')
-        // 换档时公母比例回到一半一半：上一档的比例对新档不一定合适
-        male = null
         renderPacks()
-        syncRatio()
         total()
       })
     }
   }
 
-  // 每盒公几只。没动过就是一半一半，和后端的默认值是同一个。
-  function maleOf() {
-    var s = packById(picked)
-    var size = s && s.pack_size ? s.pack_size : 0
-    return male == null ? Math.floor(size / 2) : Math.min(male, size)
-  }
-
-  function syncRatio() {
+  // 套餐只选几盒。整盒的公母一律各一半——想自己配比例就去自由搭配按只挑，
+  // 同一档凑满一盒照样按整盒价算，不用在这儿再放一组加减器。
+  function syncBoxes() {
     pickFail('')
-    var s = packById(picked)
-    var size = s && s.pack_size ? s.pack_size : 0
-    var m = maleOf()
     setText('boxNum', boxes)
-    setText('maleNum', m)
-    setText('femaleNum', size - m)
-    setText('maleVal', m)
     $('boxMinus').disabled = boxes <= 1
-    $('maleMinus').disabled = m <= 0
-    $('malePlus').disabled = m >= size
   }
 
   // ---------- 自由搭配 ----------
@@ -466,20 +450,23 @@ button.go:disabled{opacity:.45}
     return boxCount * s.unit_price + loose * s.loose_price
   }
 
-  function currentPick() {
+  // 两类选的东西合在一张单里：买 2 盒再加几只散的是常事，不该逼买家二选一。
+  // 同一档的整盒与散只分成两条 item 发给后端——后端按整盒价 + 散买价各算各的，
+  // 和合并成一条再拆的结果完全一样（8a+b 只拆出来就是 a 盒加 b 只）。
+  function packPick() {
+    var out = { crabs: 0, amount: 0, items: [], label: '' }
+    var s = packById(picked)
+    if (!s || !boxes) return out
+    var size = s.pack_size || 1
+    out.crabs = boxes * size
+    out.amount = boxes * s.unit_price
+    out.items.push({ spec_id: s.id, quantity: out.crabs })
+    out.label = packName(s) + ' ×' + boxes + (s.pack_size ? ' 盒' : ' ' + s.unit_text)
+    return out
+  }
+
+  function freePick() {
     var out = { crabs: 0, amount: 0, items: [] }
-    if (tab === 'pack') {
-      var s = packById(picked)
-      if (!s) return out
-      var size = s.pack_size || 1
-      out.crabs = boxes * size
-      out.amount = boxes * s.unit_price
-      var item = { spec_id: s.id, quantity: out.crabs }
-      // 只有动过比例才传：没传时后端按一半一半算，两边的默认值是同一个
-      if (s.pack_size && male != null) item.male_count = maleOf() * boxes
-      out.items.push(item)
-      return out
-    }
     for (var i = 0; i < specs.length; i++) {
       var sp = specs[i]
       if (!sp.pack_size) continue
@@ -493,11 +480,38 @@ button.go:disabled{opacity:.45}
     return out
   }
 
+  function allPicks() {
+    var p = packPick()
+    var f = freePick()
+    return {
+      pack: p,
+      free: f,
+      crabs: p.crabs + f.crabs,
+      amount: p.amount + f.amount,
+      items: p.items.concat(f.items)
+    }
+  }
+
   function total() {
     pickFail('')
-    var cur = currentPick()
-    $('total').textContent = yuan(cur.amount)
-    $('count').textContent = cur.crabs > 0 ? '· 共 ' + cur.crabs + ' 只' : ''
+    var all = allPicks()
+
+    // 分项写出来：在自由搭配页签上也要看得见套餐那边选了什么，
+    // 否则合计凭空多出几百块，买家不知道哪来的
+    var html = ''
+    if (all.pack.crabs) {
+      html += '<div class="bd"><span class="k">套餐　' + esc(all.pack.label) + '</span>' +
+              '<span class="v">' + esc(yuan(all.pack.amount)) + '</span></div>'
+    }
+    if (all.free.crabs) {
+      html += '<div class="bd"><span class="k">散买　共 ' + all.free.crabs + ' 只</span>' +
+              '<span class="v">' + esc(yuan(all.free.amount)) + '</span></div>'
+    }
+    // 只有一类时不用分项，合计那行已经说完了
+    $('breakdown').innerHTML = (all.pack.crabs && all.free.crabs) ? html : ''
+
+    $('total').textContent = yuan(all.amount)
+    $('count').textContent = all.crabs > 0 ? '· 共 ' + all.crabs + ' 只' : ''
   }
 
   function setText(id, v) { var el = $(id); if (el) el.textContent = v }
@@ -519,13 +533,13 @@ button.go:disabled{opacity:.45}
 
       picked = defaultPackId()
       renderPacks()
-      syncRatio()
+      syncBoxes()
       renderPicks()
       total()
     })
   }
 
-  // 默认落在第二档（甄选）：它是主推的那一档，多数人不用动就能往下填。
+  // 默认落在第二档（¥269 那一档）：它是主推的，多数人不用动就能往下填。
   // 价目表只有一档时就落在第一档。
   function defaultPackId() {
     var packs = []
@@ -539,12 +553,12 @@ button.go:disabled{opacity:.45}
   // ---------- 提交 ----------
 
   function submit() {
-    var cur = currentPick()
+    var cur = allPicks()
     var name = $('name').value.trim()
     var phone = $('phone').value.trim()
     var addr = $('addr').value.trim()
 
-    if (!cur.items.length) { pickFail(tab === 'pack' ? '先选一下要哪一档' : '先挑几只'); return }
+    if (!cur.items.length) { pickFail('先选一下要什么'); return }
     if (minQty > 0 && cur.crabs < minQty) {
       pickFail('一共 ' + minQty + ' 只起，还差 ' + (minQty - cur.crabs) + ' 只')
       return
@@ -622,20 +636,10 @@ button.go:disabled{opacity:.45}
   $('tabPack').addEventListener('click', function () { setTab('pack') })
   $('tabFree').addEventListener('click', function () { setTab('free') })
   $('boxMinus').addEventListener('click', function () {
-    if (boxes > 1) { boxes -= 1; syncRatio(); total() }
+    if (boxes > 1) { boxes -= 1; syncBoxes(); total() }
   })
   $('boxPlus').addEventListener('click', function () {
-    if (boxes < 99) { boxes += 1; syncRatio(); total() }
-  })
-  $('maleMinus').addEventListener('click', function () {
-    var m = maleOf()
-    if (m > 0) { male = m - 1; syncRatio() }
-  })
-  $('malePlus').addEventListener('click', function () {
-    var s = packById(picked)
-    var size = s && s.pack_size ? s.pack_size : 0
-    var m = maleOf()
-    if (m < size) { male = m + 1; syncRatio() }
+    if (boxes < 99) { boxes += 1; syncBoxes(); total() }
   })
 
   goEl.addEventListener('click', submit)
