@@ -74,17 +74,19 @@ func (a *API) PublicSpecs(w http.ResponseWriter, r *http.Request) {
 		out = append(out, ToPublicSpecDTO(s))
 	}
 	OK(w, map[string]any{
-		"list":         out,
-		"total":        len(out),
-		"min_quantity": service.RegMinCrabs,
+		"list":  out,
+		"total": len(out),
+		// 散买的起订只数。整盒买不受这条限制，页面据此校验零头。
+		"min_loose": service.RegMinCrabs,
 	})
 }
 
 type regItemReq struct {
-	SpecID   int64 `json:"spec_id"`
-	Quantity int   `json:"quantity"`
-	// MaleCount 套餐里公的只数。指针是为了区分「没传」和「传了 0」：
-	// 没传用默认的一半一半，传 0 就是整盒都要母的。
+	SpecID int64 `json:"spec_id"`
+	// Quantity 这一档要几只。买家不填盒数——拆成几盒加几只散的由服务端算。
+	Quantity int `json:"quantity"`
+	// MaleCount 这一档里公的只数。指针是为了区分「没传」和「传了 0」：
+	// 没传用默认的一半一半，传 0 就是整档都要母的。
 	MaleCount *int `json:"male_count"`
 }
 

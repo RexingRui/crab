@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"crab-order/internal/model"
+	"crab-order/internal/service"
 	"crab-order/internal/timex"
 )
 
@@ -169,8 +170,12 @@ type PublicSpecDTO struct {
 	UnitText      string `json:"unit_text"`
 	UnitPrice     int64  `json:"unit_price"`
 	UnitPriceYuan string `json:"unit_price_yuan"`
-	// PackSize 一盒几只，0 表示不是套餐（按只卖）。大于 0 时登记页会让买家调公母比例。
+	// PackSize 一盒几只，0 表示不是套餐（按只卖）。
 	PackSize int `json:"pack_size"`
+	// LoosePrice 凑不满一盒时，散买一只多少钱（整盒价摊开后向上取整到元）。
+	// 不是套餐的档就是它自己的单价。
+	LoosePrice     int64  `json:"loose_price"`
+	LoosePriceYuan string `json:"loose_price_yuan"`
 }
 
 // RegistrationDTO 是买家提交登记后的回执：够他记住单号、核对自己填了什么就行，
@@ -400,16 +405,18 @@ func ToPublicOrderDTO(o *model.Order) PublicOrderDTO {
 
 func ToPublicSpecDTO(s model.Spec) PublicSpecDTO {
 	return PublicSpecDTO{
-		ID:            s.ID,
-		Gender:        string(s.Gender),
-		GenderText:    s.Gender.Text(),
-		SpecGram:      s.SpecGram,
-		SpecLabel:     s.SpecLabel,
-		Unit:          string(s.Unit),
-		UnitText:      s.Unit.Text(),
-		UnitPrice:     s.UnitPrice,
-		UnitPriceYuan: model.FormatYuan(s.UnitPrice),
-		PackSize:      s.PackSize,
+		ID:             s.ID,
+		Gender:         string(s.Gender),
+		GenderText:     s.Gender.Text(),
+		SpecGram:       s.SpecGram,
+		SpecLabel:      s.SpecLabel,
+		Unit:           string(s.Unit),
+		UnitText:       s.Unit.Text(),
+		UnitPrice:      s.UnitPrice,
+		UnitPriceYuan:  model.FormatYuan(s.UnitPrice),
+		PackSize:       s.PackSize,
+		LoosePrice:     service.LoosePrice(s),
+		LoosePriceYuan: model.FormatYuan(service.LoosePrice(s)),
 	}
 }
 

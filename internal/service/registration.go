@@ -39,10 +39,13 @@ var ErrDuplicateRegistration = errs.New(errs.CodeIdempotent,
 // RegistrationItemInput 买家选的一档。没有 unit_price，故意的。
 type RegistrationItemInput struct {
 	SpecID int64
-	// Quantity 套餐是几盒，按只卖的档是几只。
+	// Quantity 这一档要几只（按斤卖的档就是几斤）。
+	//
+	// 买家只填只数，不填盒数：拆成几盒加几只散的是服务端的事。
+	// 买家不该为了用这个页面，先自己算清楚凑不凑得满一盒。
 	Quantity int
-	// MaleCount 套餐里公的只数，母的 = PackSize - MaleCount。
-	// nil 表示买家没动过比例，用默认的一半一半。非套餐的档忽略这个值。
+	// MaleCount 这一档里公的只数，母的 = Quantity - MaleCount。
+	// nil 表示买家没动过比例，用默认的一半一半。按斤卖的档忽略这个值。
 	MaleCount *int
 }
 
@@ -95,9 +98,6 @@ func (s *OrderService) CreateRegistration(ctx context.Context, in RegistrationIn
 	if err != nil {
 		return nil, false, err
 	}
-	if err := checkMinCrabs(items); err != nil {
-		return nil, false, err
-	}
 
 	// 幂等要排在查重前面：同一条链接重复提交（刷新成功页、连点两下）应该拿回原来那笔单，
 	// 而不是被手机号查重拦下来报「已经登记过」。
@@ -144,7 +144,7 @@ func regOperator(issuer string) string {
 	return "buyer via " + issuer
 }
 
-// resolveRegItems 把买家选的 spec_id + quantity 翻译成明细快照。
+// resolveRegItems 把买家选的 spec_id + 只数翻译成明细快照。
 // 单价、规格名、克数、单位全部取自 specs 表当前值，买家传什么都不看。
 func (s *OrderService) resolveRegItems(ctx context.Context, in []RegistrationItemInput) ([]ItemInput, error) {
 	if len(in) == 0 {
@@ -153,7 +153,7 @@ func (s *OrderService) resolveRegItems(ctx context.Context, in []RegistrationIte
 	if len(in) > regMaxItems {
 		return nil, errs.InvalidParam("最多选 %d 档", regMaxItems)
 	}
-	out := make([]ItemInput, 0, len(in))
+	out := make([]ItemInput, 0, len(in)*2) // 一档可能拆成整盒 + 散只两条
 	for i, it := range in {
 		if it.Quantity < 1 || it.Quantity > regMaxQuantity {
 			return nil, errs.InvalidParam("items[%d].quantity 应在 1-%d 之间", i, regMaxQuantity)
@@ -166,67 +166,119 @@ func (s *OrderService) resolveRegItems(ctx context.Context, in []RegistrationIte
 		if !sp.Enabled {
 			return nil, errs.InvalidParam("选的规格已经不在了，刷新一下再试")
 		}
-		label, err := packLabel(*sp, it.MaleCount, i)
+		rows, err := splitPack(*sp, it.Quantity, it.MaleCount, i)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ItemInput{
-			Gender:    sp.Gender,
-			SpecGram:  sp.SpecGram,
-			SpecLabel: label,
-			Unit:      sp.Unit,
-			Quantity:  it.Quantity,
-			UnitPrice: sp.UnitPrice,
-			PackSize:  sp.PackSize,
-		})
+		out = append(out, rows...)
 	}
 	return out, nil
 }
 
-// countCrabs 数这批明细一共多少只。
+// LoosePrice 散买一只多少钱：整盒价按盒里的只数摊开，**向上取整到元**。
 //
-// 按盒的档要乘上一盒几只；按只的档就是数量本身。按斤卖的档没法折算成只，
-// 所以不计入，也让整单跳过起订校验——论斤买本来就不论只。
-// 第二个返回值为 false 表示这单里有按斤的档，只数算不准。
-func countCrabs(items []ItemInput) (int, bool) {
-	n := 0
-	for _, it := range items {
-		switch it.Unit {
-		case model.UnitBox:
-			n += it.Quantity * it.PackSize
-		case model.UnitPiece:
-			n += it.Quantity
-		default:
-			return 0, false
-		}
-	}
-	return n, true
-}
-
-// checkMinCrabs 起订量校验。
-func checkMinCrabs(items []ItemInput) error {
-	n, countable := countCrabs(items)
-	if !countable || n >= RegMinCrabs {
-		return nil
-	}
-	return errs.InvalidParam("最少 %d 只起，现在只有 %d 只", RegMinCrabs, n)
-}
-
-// packLabel 把套餐的公母比例写进明细快照。
-//
-// 价格不随比例变（一盒就是一盒的价），比例只是配货信息，所以它只影响 spec_label——
-// 而 spec_label 本来就是快照，卖家发货时照着配就行，日后改价改档都不会动到历史订单。
-// 不是套餐的档原样返回，比例传了也不看。
-func packLabel(sp model.Spec, maleCount *int, idx int) (string, error) {
+// 189 / 8 = 23.625 → 24 元。取到元而不是到分，一来报价好说出口，二来天然保证
+// 「整盒比散买划算」（8 只散买 192 元 > 整盒 189 元），不会出现凑不满盒反而更便宜。
+// 不是套餐的档没有散买这回事，返回它自己的单价。
+func LoosePrice(sp model.Spec) int64 {
 	if !sp.IsPack() {
-		return sp.SpecLabel, nil
+		return sp.UnitPrice
 	}
-	male := sp.PackSize / 2 // 买家没动过就是默认的一半一半
+	perYuan := int64(sp.PackSize) * 100 // 一元 = 100 分
+	return ((sp.UnitPrice + perYuan - 1) / perYuan) * 100
+}
+
+// splitPack 把「这一档要 n 只」拆成整盒 + 散只两条明细。
+//
+// 整盒部分走套餐价，凑不满一盒的零头走散买价。零头不是 0 就必须够起订量——
+// 「最低 5 只」只管这种不按整盒买的情况，整盒买多少都行。
+// 不是套餐的档没有「整盒」，整条按它自己的单价走，同样受起订量约束。
+func splitPack(sp model.Spec, n int, maleCount *int, idx int) ([]ItemInput, error) {
+	male := n / 2 // 买家没动过就是默认的一半一半
 	if maleCount != nil {
 		male = *maleCount
 	}
-	if male < 0 || male > sp.PackSize {
-		return "", errs.InvalidParam("items[%d].male_count 应在 0-%d 之间", idx, sp.PackSize)
+	if male < 0 || male > n {
+		return nil, errs.InvalidParam("items[%d].male_count 应在 0-%d 之间", idx, n)
 	}
-	return fmt.Sprintf("%s（公%d母%d）", sp.SpecLabel, male, sp.PackSize-male), nil
+
+	base := ItemInput{
+		Gender:    sp.Gender,
+		SpecGram:  sp.SpecGram,
+		SpecLabel: sp.SpecLabel,
+		Unit:      sp.Unit,
+		UnitPrice: sp.UnitPrice,
+		PackSize:  sp.PackSize,
+	}
+
+	if !sp.IsPack() {
+		// 按斤卖的档不论只，起订量与公母比例都不适用
+		if sp.Unit != model.UnitPiece {
+			row := base
+			row.Quantity = n
+			return []ItemInput{row}, nil
+		}
+		if n < RegMinCrabs {
+			return nil, errs.InvalidParam("「%s」最少 %d 只起，现在只有 %d 只", sp.SpecLabel, RegMinCrabs, n)
+		}
+		row := base
+		row.Quantity = n
+		row.SpecLabel = withRatio(sp.SpecLabel, male, n-male)
+		return []ItemInput{row}, nil
+	}
+
+	boxes := n / sp.PackSize
+	loose := n % sp.PackSize
+	if loose > 0 && loose < RegMinCrabs {
+		// 顺手把最近的两个合法只数算给买家，省得他自己试
+		return nil, errs.InvalidParam("「%s」散买最少 %d 只起：%d 只里有 %d 只凑不满一盒，改成 %d 只或 %d 只",
+			sp.SpecLabel, RegMinCrabs, n, loose, boxes*sp.PackSize, boxes*sp.PackSize+RegMinCrabs)
+	}
+
+	boxCrabs := boxes * sp.PackSize
+	maleInBox := splitMale(male, n, boxCrabs, loose)
+
+	rows := make([]ItemInput, 0, 2)
+	if boxes > 0 {
+		row := base
+		row.Quantity = boxes
+		row.SpecLabel = withRatio(sp.SpecLabel, maleInBox, boxCrabs-maleInBox)
+		rows = append(rows, row)
+	}
+	if loose > 0 {
+		row := base
+		row.Unit = model.UnitPiece // 散只按只记，单价是散买价
+		row.Quantity = loose
+		row.UnitPrice = LoosePrice(sp)
+		row.PackSize = 0
+		row.SpecLabel = withRatio(sp.SpecLabel+" 散只", male-maleInBox, loose-(male-maleInBox))
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// splitMale 把公的只数按比例分摊到整盒与散只两部分，整盒那份四舍五入。
+// 卖家配货只关心这一档一共几公几母，分摊纯粹是为了两条明细各自写得出比例。
+func splitMale(male, total, boxCrabs, loose int) int {
+	if total <= 0 {
+		return 0
+	}
+	inBox := (male*boxCrabs + total/2) / total
+	// 夹回合法区间：盒里装不下那么多公的，散只那份也不能是负数
+	if inBox > boxCrabs {
+		inBox = boxCrabs
+	}
+	if male-inBox > loose {
+		inBox = male - loose
+	}
+	if inBox < 0 {
+		inBox = 0
+	}
+	return inBox
+}
+
+// withRatio 把公母只数写进明细快照。比例不影响金额，只是配货信息，
+// 而 spec_label 本来就是快照——日后改价改档都不会回头动历史订单。
+func withRatio(label string, male, female int) string {
+	return fmt.Sprintf("%s（公%d母%d）", label, male, female)
 }
