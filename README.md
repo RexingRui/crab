@@ -31,7 +31,8 @@ curl localhost:8080/healthz
 # {"code":0,"msg":"ok","data":{"status":"ok"}}
 ```
 
-首次启动会自动建表，并在 `specs` 表为空时写入 8 条当季参考价。
+首次启动会自动建表，并在 `specs` 表为空时写入当季价目表（4 档 8 只装套餐）。
+**已经跑起来的库不会被覆盖**——换价目表去小程序「设置」页，把旧的档停用、把新的加上。
 
 ### 构建与测试
 
@@ -252,7 +253,12 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/stats/ship-plan?date=
 
 口径：`today.revenue` 是当天**实际收到的钱**（按 `payments.paid_at` 计，含退款负数）；`range.*` 按订单**创建时间**落在区间内统计；`pending.unpaid_amount` 不含已取消的订单。`ship-plan` 的 `date` 默认明天。
 
-**地址簿 / 规格价目表**
+**地址簿 / 价目表**
+
+价目表一档可以是**套餐**（按盒卖，`unit=box` + `pack_size>0`），也可以是**单规格**
+（按只/按斤卖，`pack_size=0`）。套餐的 `gender` 是 `mixed`、`unit_price` 是整盒价、
+`spec_gram` 是整盒克重；一盒里公母各几只不存在这张表里，由买家登记时自己定，
+价格不随比例变。
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/addresses?keyword=张&limit=20'
@@ -262,6 +268,9 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/specs?all=1'  # 连�
 
 curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
   -d '{"gender":"male","spec_gram":300,"spec_label":"6.0两","unit":"piece","unit_price":16800}'
+# 套餐档：整盒价 + 一盒几只
+curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
+  -d '{"gender":"mixed","spec_gram":1200,"spec_label":"8只装 母2.5两/公3.5两","unit":"box","unit_price":18900,"pack_size":8}'
 curl -X PUT localhost:8080/api/specs/3 -H "Authorization: Bearer $TOKEN" \
   -d '{"gender":"male","spec_gram":225,"spec_label":"4.5两","unit":"piece","unit_price":9500}'
 curl -X DELETE localhost:8080/api/specs/3 -H "Authorization: Bearer $TOKEN"   # 停用，不物理删
@@ -309,7 +318,7 @@ curl -X POST localhost:8080/api/public/registrations \
     "phone": "13900139001",
     "address": "江苏省苏州市姑苏区平江路100号2单元501",
     "wechat_nick": "四哥",
-    "items": [{"spec_id": 3, "quantity": 3}],
+    "items": [{"spec_id": 1, "quantity": 2, "male_count": 6}],
     "expect_ship_date": "2026-09-20",
     "remark": "工作日收不到，周末发"
   }'
@@ -325,8 +334,12 @@ curl -X POST localhost:8080/api/public/registrations \
   撞 `uk_orders_request` 唯一索引。重复提交返回原来那笔单（`code 0` + `idempotent: true`），
   不是错误，也不会重复建单。**不需要服务端记账，所以没有新表。**
   幂等命中的回执里**姓名打码**——链接会被转发，拿到转发链接的人提交一次就能看到这张回执。
-- **单价只认 `specs` 表**：买家只传 `spec_id + quantity`，`unit_price` / `freight_fee` /
-  `discount` 传了也不看。运费与优惠留给卖家在小程序里补。
+- **单价只认 `specs` 表**：买家只传 `spec_id + quantity`（套餐再加一个 `male_count`），
+  `unit_price` / `freight_fee` / `discount` 传了也不看。运费与优惠留给卖家在小程序里补。
+- **套餐的公母比例只影响明细快照，不影响金额**：一盒就是一盒的价。`male_count` 不传
+  就是一半一半（所以它在请求里是可空的——传 `0` 表示整盒都要母的，和「没传」不是一回事），
+  越界返回 40001。比例写进 `spec_label`，形如 `8只装 母2.5两/公3.5两（公6母2）`，
+  卖家照着配货就行。**自由搭配**就是一次登记里混几档不同的套餐，各算各的盒数。
 - **手机号一天内查重**：同号第二次提交返回 `40901`，提示「已经登记过了」。
   提示里**不回单号**——链接可能被转发，不能让持链接的人拿任意手机号反查出别人的单号
   （有了单号和手机号就能在查单页看到脱敏详情）。
@@ -335,6 +348,8 @@ curl -X POST localhost:8080/api/public/registrations \
 
 卖家侧：列表支持 `?source=web` 筛出买家登记的单，CSV 导出多一列「来源」，
 订单卡片和详情页会标出来（灰字，不是彩色标签——它是出处，不是待办）。
+小程序的「选规格」与「设置」页都认套餐：页签按价目表里实际有的分组生成，
+全是套餐时不会摆两个空的「公 / 母」页签。
 
 ## 前端
 
@@ -413,13 +428,15 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 同样是单个静态 HTML，同一套色板与排版规矩，无构建步骤、无框架、无 CDN、无埋点。
 链接形如 `https://<域名>/r?t=<token>`，没有 `t=` 或 token 过期都直接给一句话，不显示表单。
 
-页面只做三件事：拉 `/api/public/specs` 列出当季规格与价格、用加减器选数量（当场算货款合计）、
-收齐收货信息后提交。几个刻意的选择：
+页面只做三件事：拉 `/api/public/specs` 列出当季价目、用加减器选几盒（套餐再多一行公母比例，
+选了盒数才露出来）、收齐收货信息后提交。几个刻意的选择：
 
-- 合计只是**货款预估**，不含运费，页面上明写「最终金额以店主确认为准」；
+- 合计只是**货款预估**，不含运费，页面上明写「运费和最终费用等发出后确认」；
   回执里显示的是**后端返回的 `payable_amount`**，不是页面自己加的那个数。
+- 比例默认一半一半，**没动过就不传 `male_count`**，让后端取默认值——两边的默认值是同一个，
+  不在前端复制一份。
 - 金额一律按「分」的整数算，分转元走整数运算，前端也不碰浮点。
-- 加减数量只改那一行的数字，不重建整个列表——重建会让刚点的按钮换一个 DOM 节点，
+- 加减只改动过的那几个节点，不重建整个列表——重建会让刚点的按钮换一个 DOM 节点，
   连点时焦点和触摸态都会丢。
 - 提交成功后表单整个换成回执，带单号、明细、货款和一条查单页链接。
   刷新页面重新提交同一条链接会命中幂等，看到的还是同一笔单。

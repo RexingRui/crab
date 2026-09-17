@@ -12,13 +12,13 @@ import (
 
 // ---------- 规格价目表 ----------
 
-const specColumns = `id, gender, spec_gram, spec_label, unit, unit_price, enabled, sort_no, updated_at`
+const specColumns = `id, gender, spec_gram, spec_label, unit, unit_price, pack_size, enabled, sort_no, updated_at`
 
 func scanSpec(sc rowScanner) (*model.Spec, error) {
 	var s model.Spec
 	var enabled int
 	if err := sc.Scan(&s.ID, &s.Gender, &s.SpecGram, &s.SpecLabel, &s.Unit,
-		&s.UnitPrice, &enabled, &s.SortNo, &s.UpdatedAt); err != nil {
+		&s.UnitPrice, &s.PackSize, &enabled, &s.SortNo, &s.UpdatedAt); err != nil {
 		return nil, err
 	}
 	s.Enabled = enabled != 0
@@ -63,10 +63,10 @@ func (q *queries) GetSpecByID(ctx context.Context, id int64) (*model.Spec, error
 
 func (q *queries) InsertSpec(ctx context.Context, s *model.Spec) error {
 	res, err := q.db.ExecContext(ctx,
-		`INSERT INTO specs(gender, spec_gram, spec_label, unit, unit_price, enabled, sort_no, updated_at)
-		 VALUES(?,?,?,?,?,?,?,?)`,
+		`INSERT INTO specs(gender, spec_gram, spec_label, unit, unit_price, pack_size, enabled, sort_no, updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?)`,
 		string(s.Gender), s.SpecGram, s.SpecLabel, string(s.Unit), s.UnitPrice,
-		boolToInt(s.Enabled), s.SortNo, s.UpdatedAt)
+		s.PackSize, boolToInt(s.Enabled), s.SortNo, s.UpdatedAt)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return fmt.Errorf("%w: %v", ErrDuplicate, err)
@@ -84,9 +84,9 @@ func (q *queries) InsertSpec(ctx context.Context, s *model.Spec) error {
 func (q *queries) UpdateSpec(ctx context.Context, s *model.Spec) error {
 	res, err := q.db.ExecContext(ctx,
 		`UPDATE specs SET gender=?, spec_gram=?, spec_label=?, unit=?, unit_price=?,
-		 enabled=?, sort_no=?, updated_at=? WHERE id=?`,
+		 pack_size=?, enabled=?, sort_no=?, updated_at=? WHERE id=?`,
 		string(s.Gender), s.SpecGram, s.SpecLabel, string(s.Unit), s.UnitPrice,
-		boolToInt(s.Enabled), s.SortNo, s.UpdatedAt, s.ID)
+		s.PackSize, boolToInt(s.Enabled), s.SortNo, s.UpdatedAt, s.ID)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return fmt.Errorf("%w: %v", ErrDuplicate, err)

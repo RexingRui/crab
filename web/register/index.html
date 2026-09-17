@@ -35,12 +35,23 @@ input:focus,textarea:focus{outline:none;border-color:var(--shell)}
 input[type=tel],input[type=date]{font-variant-numeric:tabular-nums}
 .gap{margin-top:20px}
 
-/* 规格：左边名字与单价，右边加减。数量与金额一律 tabular-nums，竖着能对齐扫读 */
-.spec{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
-.spec:first-of-type{border-top:none;padding-top:0}
+/* 一档一行：左边档名与整盒价，右边加减几盒。
+   数量与金额一律 tabular-nums，竖着能对齐扫读 */
+.pack{padding:14px 0;border-top:1px solid var(--line)}
+.pack:first-of-type{border-top:none;padding-top:0}
+.spec{display:flex;align-items:center;gap:12px}
 .spec .name{flex:1;min-width:0}
 .spec .t{font-size:15px}
 .spec .p{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:2px}
+
+/* 比例行：选了盒数才出现。公母总数固定，价格不跟着变。
+   加减器做小一号，免得和上面那个「几盒」分不清主次 */
+.ratio{display:none;align-items:center;gap:10px;margin-top:12px}
+.ratio.on{display:flex}
+.ratio .lab{font-size:13px;color:var(--muted);flex:1;min-width:0}
+.ratio .lab b{font-weight:600;color:var(--shell-deep);font-variant-numeric:tabular-nums}
+.ratio .step button{width:26px;height:26px;font-size:15px;border-radius:7px}
+.ratio .step .n{width:28px;font-size:14px}
 .step{display:flex;align-items:center;gap:2px}
 .step button{
   width:32px;height:32px;padding:0;margin:0;border-radius:8px;
@@ -93,13 +104,14 @@ button.go:disabled{opacity:.45}
 
   <div class="form" id="form">
     <div class="card" id="specCard">
-      <h2>要什么规格</h2>
-      <div id="specs"><div class="dead">正在取当季的规格…</div></div>
+      <h2>要哪一档</h2>
+      <div id="specs"><div class="dead">正在取当季的价目…</div></div>
       <div class="sum">
         <span class="k">货款合计</span>
         <span class="v" id="total">¥0.00</span>
       </div>
-      <div class="hint">这是按当季价算的货款，不含运费。最终金额以店主确认为准。</div>
+      <div class="hint">按当季价算的货款，不含运费。运费和最终费用等发出后确认。<br>
+      每盒 8 只，公母只数可以自己调，怎么配价格都一样。</div>
     </div>
 
     <div class="card">
@@ -118,7 +130,7 @@ button.go:disabled{opacity:.45}
       </div>
 
       <div class="gap">
-        <label for="nick">微信昵称 <span class="opt">（选填，方便店主对上人）</span></label>
+        <label for="nick">微信昵称 <span class="opt">（选填，方便对上人）</span></label>
         <input id="nick" maxlength="32" placeholder="微信里显示的名字">
       </div>
 
@@ -128,7 +140,7 @@ button.go:disabled{opacity:.45}
       </div>
 
       <div class="gap">
-        <label for="remark">给店主留一句 <span class="opt">（选填）</span></label>
+        <label for="remark">留一句话 <span class="opt">（选填）</span></label>
         <input id="remark" maxlength="200" placeholder="比如：工作日收不到，周末发">
       </div>
 
@@ -150,7 +162,8 @@ button.go:disabled{opacity:.45}
   var token = (new URLSearchParams(location.search).get('t') || '').trim()
 
   var specs = []   // 后端 /api/public/specs 的原样数据
-  var qty = {}     // spec_id -> 数量
+  var qty = {}     // spec_id -> 几盒（非套餐是几只）
+  var male = {}    // spec_id -> 每盒公的只数；没动过就没有这个键
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -192,11 +205,12 @@ button.go:disabled{opacity:.45}
     req.send(body ? JSON.stringify(body) : null)
   }
 
-  // ---------- 规格 ----------
+  // ---------- 价目 ----------
 
+  // 一档一行。套餐（pack_size > 0）多一行公母比例，选了盒数才露出来。
   function renderSpecs() {
     if (!specs.length) {
-      $('specs').innerHTML = '<div class="dead">这会儿没有可登记的规格，<br>问一下店主吧</div>'
+      $('specs').innerHTML = '<div class="dead">这会儿没有可登记的档，<br>问一下再来</div>'
       return
     }
     var html = ''
@@ -204,16 +218,15 @@ button.go:disabled{opacity:.45}
       var s = specs[i]
       var n = qty[s.id] || 0
       html +=
-        '<div class="spec">' +
-          '<div class="name">' +
-            '<div class="t">' + esc(s.gender_text + s.spec_label) + '</div>' +
-            '<div class="p">' + esc(yuan(s.unit_price)) + ' / ' + esc(s.unit_text) + '</div>' +
+        '<div class="pack">' +
+          '<div class="spec">' +
+            '<div class="name">' +
+              '<div class="t">' + esc(packName(s)) + '</div>' +
+              '<div class="p">' + esc(yuan(s.unit_price)) + ' / ' + esc(s.unit_text) + '</div>' +
+            '</div>' +
+            step(s.id, 'q', n, !n) +
           '</div>' +
-          '<div class="step">' +
-            '<button type="button" data-id="' + s.id + '" data-d="-1" aria-label="减少"' + (n ? '' : ' disabled') + '>−</button>' +
-            '<span class="n' + (n ? '' : ' zero') + '" id="n' + s.id + '">' + n + '</span>' +
-            '<button type="button" data-id="' + s.id + '" data-d="1" aria-label="增加">+</button>' +
-          '</div>' +
+          (s.pack_size > 0 ? ratioRow(s, n) : '') +
         '</div>'
     }
     $('specs').innerHTML = html
@@ -221,31 +234,91 @@ button.go:disabled{opacity:.45}
     var btns = $('specs').getElementsByTagName('button')
     for (var k = 0; k < btns.length; k++) {
       btns[k].addEventListener('click', function () {
-        bump(this.getAttribute('data-id'), +this.getAttribute('data-d'))
+        bump(this.getAttribute('data-id'), this.getAttribute('data-k'), +this.getAttribute('data-d'))
       })
     }
     total()
   }
 
+  // 套餐名里已经写了盒里装什么，不再加「公母」前缀，那个前缀说不出任何东西
+  function packName(s) {
+    return s.pack_size > 0 ? s.spec_label : s.gender_text + s.spec_label
+  }
+
+  // kind: q=盒数 / m=每盒公的只数
+  function step(id, kind, n, minusOff) {
+    return '<div class="step">' +
+      '<button type="button" data-id="' + id + '" data-k="' + kind + '" data-d="-1" aria-label="减少"' +
+        (minusOff ? ' disabled' : '') + '>−</button>' +
+      '<span class="n' + (n ? '' : ' zero') + '" id="' + kind + id + '">' + n + '</span>' +
+      '<button type="button" data-id="' + id + '" data-k="' + kind + '" data-d="1" aria-label="增加">+</button>' +
+    '</div>'
+  }
+
+  function ratioRow(s, n) {
+    var m = maleOf(s)
+    return '<div class="ratio' + (n ? ' on' : '') + '" id="r' + s.id + '">' +
+      '<span class="lab">每盒 公 <b id="mv' + s.id + '">' + m + '</b> 只 · 母 <b id="fv' + s.id + '">' +
+        (s.pack_size - m) + '</b> 只</span>' +
+      step(s.id, 'm', m, m <= 0) +
+    '</div>'
+  }
+
   // MAX 与后端 regMaxQuantity 对齐：后端也拦，这里只是不让人白填
   var MAX = 200
 
-  // 只改那一行的数字，不重建整个列表：重建会让刚点的那个按钮换一个 DOM 节点，
+  // 默认一半一半。没动过就不往请求里塞 male_count，让后端自己取默认值。
+  function maleOf(s) {
+    return male[s.id] == null ? Math.floor(s.pack_size / 2) : male[s.id]
+  }
+
+  function specById(id) {
+    for (var i = 0; i < specs.length; i++) {
+      if (String(specs[i].id) === String(id)) return specs[i]
+    }
+    return null
+  }
+
+  // 只改动过的那几个节点，不重建整个列表：重建会让刚点的按钮换一个 DOM 节点，
   // 连点时焦点和触摸态都会丢。
-  function bump(id, d) {
+  function bump(id, kind, d) {
+    var s = specById(id)
+    if (!s) return
+
+    if (kind === 'm') {
+      var m = maleOf(s) + d
+      if (m < 0) m = 0
+      if (m > s.pack_size) m = s.pack_size
+      male[id] = m
+      setText('mv' + id, m)
+      setText('fv' + id, s.pack_size - m)
+      setText('m' + id, m)
+      toggleZero('m' + id, m)
+      disableMinus('m' + id, m <= 0)
+      return
+    }
+
     var n = (qty[id] || 0) + d
     if (n < 0) n = 0
     if (n > MAX) n = MAX
     qty[id] = n
+    setText('q' + id, n)
+    toggleZero('q' + id, n)
+    disableMinus('q' + id, !n)
 
-    var el = $('n' + id)
-    if (el) {
-      el.textContent = n
-      el.className = 'n' + (n ? '' : ' zero')
-      var minus = el.parentNode.getElementsByTagName('button')[0]
-      if (minus) minus.disabled = !n
-    }
+    // 盒数归零就把比例行收起来，别让人对着一个没选的档调比例
+    var row = $('r' + id)
+    if (row) row.className = 'ratio' + (n ? ' on' : '')
     total()
+  }
+
+  function setText(id, v) { var el = $(id); if (el) el.textContent = v }
+  function toggleZero(id, v) { var el = $(id); if (el) el.className = 'n' + (v ? '' : ' zero') }
+  function disableMinus(id, off) {
+    var el = $(id)
+    if (!el) return
+    var minus = el.parentNode.getElementsByTagName('button')[0]
+    if (minus) minus.disabled = off
   }
 
   function total() {
@@ -259,7 +332,7 @@ button.go:disabled{opacity:.45}
   function loadSpecs() {
     request('GET', '/api/public/specs', null, function (e, body) {
       if (e || !body || body.code !== 0 || !body.data) {
-        $('specs').innerHTML = '<div class="dead">规格没取到，刷新一下试试</div>'
+        $('specs').innerHTML = '<div class="dead">价目没取到，刷新一下试试</div>'
         return
       }
       specs = body.data.list || []
@@ -272,8 +345,13 @@ button.go:disabled{opacity:.45}
   function pickedItems() {
     var out = []
     for (var i = 0; i < specs.length; i++) {
-      var n = qty[specs[i].id] || 0
-      if (n > 0) out.push({ spec_id: specs[i].id, quantity: n })
+      var s = specs[i]
+      var n = qty[s.id] || 0
+      if (!n) continue
+      var item = { spec_id: s.id, quantity: n }
+      // 只有动过比例才传：没传时后端按一半一半算，两边的默认值是同一个
+      if (s.pack_size > 0 && male[s.id] != null) item.male_count = male[s.id]
+      out.push(item)
     }
     return out
   }
@@ -284,7 +362,7 @@ button.go:disabled{opacity:.45}
     var phone = $('phone').value.trim()
     var addr = $('addr').value.trim()
 
-    if (!items.length) { fail('先选一下要什么规格'); return }
+    if (!items.length) { fail('先选一下要哪一档'); return }
     if (!name) { fail('收货人还没填'); return }
     if (!/^1[3-9]\d{9}$/.test(phone)) { fail('手机号看着不对，检查一下'); return }
     if (addr.length < 5) { fail('地址写详细一点，门牌号别漏'); return }
@@ -321,7 +399,7 @@ button.go:disabled{opacity:.45}
     var html =
       '<div class="tick">✓</div>' +
       '<div class="no">' + esc(d.order_no) + '</div>' +
-      '<div class="cap">' + (d.idempotent ? '这条链接之前已经登记过了，就是这一单' : '登记好了，店主会跟你联系') + '</div>' +
+      '<div class="cap">' + (d.idempotent ? '这条链接之前已经登记过了，就是这一单' : '登记好了，稍后跟你确认') + '</div>' +
       '<div class="kv"><span class="k">收货人</span><span class="v">' + esc(d.receiver_name) + '</span></div>' +
       '<div class="kv"><span class="k">规格</span><span class="v">' + esc(d.items_summary) + '</span></div>' +
       // 这里显示的是后端算出来的应收，不是页面上那个预估
@@ -329,7 +407,7 @@ button.go:disabled{opacity:.45}
       (d.expect_ship_date ? '<div class="kv"><span class="k">希望发货</span><span class="v">' + esc(fmtDay(d.expect_ship_date)) + '</span></div>' : '') +
       '<div class="line">' +
         '单号记一下，或者截个图。<br>' +
-        '运费和最终金额由店主确认后告诉你。<br>' +
+        '运费和最终费用等发出后确认。<br>' +
         '发货之后可以在 <a href="/t?no=' + encodeURIComponent(d.order_no) + '">这里查物流</a>（要填手机后四位）。' +
       '</div>'
     doneEl.innerHTML = html
@@ -343,7 +421,7 @@ button.go:disabled{opacity:.45}
 
   if (!token) {
     formEl.className = 'form off'
-    doneEl.innerHTML = '<div class="dead">这条链接不完整，<br>找店主重新发一条过来</div>'
+    doneEl.innerHTML = '<div class="dead">这条链接不完整，<br>重新要一条吧</div>'
     doneEl.className = 'card done on'
     $('sub').textContent = '链接有点问题'
     return

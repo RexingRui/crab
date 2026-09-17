@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  fenToYuan, yuanToFen, overdueDays, statusText, statusColor, maskPhone, maskName, formatDate
+  fenToYuan, yuanToFen, overdueDays, statusText, statusColor, maskPhone, maskName, formatDate,
+  itemName
 } from '../format'
 
 describe('金额换算走整数运算', () => {
@@ -62,5 +63,23 @@ describe('脱敏', () => {
   it('手机号与姓名', () => {
     expect(maskPhone('13800138000')).toBe('138****8000')
     expect(maskName('张三')).toBe('张*')
+  })
+})
+
+describe('itemName', () => {
+  it('套餐不加「公母」前缀，档名本来就写了盒里装什么', () => {
+    expect(itemName({
+      gender: 'mixed', gender_text: '公母',
+      spec_label: '8只装 母2.5两/公3.5两（公6母2）'
+    })).toBe('8只装 母2.5两/公3.5两（公6母2）')
+  })
+
+  it('按只卖的照旧带前缀', () => {
+    expect(itemName({ gender: 'male', gender_text: '公', spec_label: '4.5两' })).toBe('公 4.5两')
+  })
+
+  it('空值不炸', () => {
+    expect(itemName(null)).toBe('')
+    expect(itemName({ gender: 'female', spec_label: '3.5两' })).toBe('3.5两')
   })
 })

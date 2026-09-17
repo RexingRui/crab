@@ -79,7 +79,7 @@ func (s *RegSigner) Issue(issuer, remark string, now time.Time) (string, *RegCla
 }
 
 // ErrInvalidRegToken 登记链接无效或已过期。买家看得懂的话术，不解释具体原因。
-var ErrInvalidRegToken = errs.New(errs.CodeUnauthorized, "登记链接无效或已过期，请找店主重新发一条")
+var ErrInvalidRegToken = errs.New(errs.CodeUnauthorized, "登记链接无效或已过期，重新要一条吧")
 
 // Verify 校验登记链接 token 的签名与有效期。
 func (s *RegSigner) Verify(token string, now time.Time) (*RegClaims, error) {

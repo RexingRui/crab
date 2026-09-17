@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"unicode/utf8"
 
 	"crab-order/internal/errs"
@@ -16,9 +17,9 @@ import (
 // 录单接口的 unit_price 是客户端给的（卖家可以临时改价），这条路径照抄过来就等于买家自己定价。
 
 const (
-	// regMaxItems 一次登记最多几种规格。买家不是批发商，10 种够了。
+	// regMaxItems 一次登记最多几档。自由搭配也就是混几档，10 档够了。
 	regMaxItems = 10
-	// regMaxQuantity 单种规格的数量上限，挡住手滑多按几个 0。
+	// regMaxQuantity 单档的数量上限（套餐是盒数），挡住手滑多按几个 0。
 	regMaxQuantity = 200
 	// regDedupWindow 手机号查重的时间窗口：一天内同号只收一次。
 	regDedupWindow = 24 * 60 * 60
@@ -28,12 +29,16 @@ const (
 // 只告诉买家「已经登记过」，不回单号：链接可能被转发，不能让持链接的人拿任意手机号
 // 反查出别人的单号（拿到单号 + 手机号就能在查单页看到脱敏详情）。
 var ErrDuplicateRegistration = errs.New(errs.CodeIdempotent,
-	"这个手机号今天已经登记过了，要改或者要再订一份，直接找店主说一声")
+	"这个手机号今天已经登记过了，要改或者要再订一份，说一声就行")
 
-// RegistrationItemInput 买家选的一种规格。没有 unit_price，故意的。
+// RegistrationItemInput 买家选的一档。没有 unit_price，故意的。
 type RegistrationItemInput struct {
-	SpecID   int64
+	SpecID int64
+	// Quantity 套餐是几盒，按只卖的档是几只。
 	Quantity int
+	// MaleCount 套餐里公的只数，母的 = PackSize - MaleCount。
+	// nil 表示买家没动过比例，用默认的一半一半。非套餐的档忽略这个值。
+	MaleCount *int
 }
 
 // RegistrationInput 买家提交的登记内容。JTI 与 Issuer 来自链接里的 token，不是买家填的。
@@ -135,10 +140,10 @@ func regOperator(issuer string) string {
 // 单价、规格名、克数、单位全部取自 specs 表当前值，买家传什么都不看。
 func (s *OrderService) resolveRegItems(ctx context.Context, in []RegistrationItemInput) ([]ItemInput, error) {
 	if len(in) == 0 {
-		return nil, errs.InvalidParam("至少选一种规格")
+		return nil, errs.InvalidParam("至少选一档")
 	}
 	if len(in) > regMaxItems {
-		return nil, errs.InvalidParam("最多选 %d 种规格", regMaxItems)
+		return nil, errs.InvalidParam("最多选 %d 档", regMaxItems)
 	}
 	out := make([]ItemInput, 0, len(in))
 	for i, it := range in {
@@ -147,20 +152,43 @@ func (s *OrderService) resolveRegItems(ctx context.Context, in []RegistrationIte
 		}
 		sp, err := s.st.GetSpecByID(ctx, it.SpecID)
 		if err != nil {
-			// 规格不存在只说「选的规格不在了」，不回显 id，也不区分停用与不存在。
+			// 规格不存在只说「选的不在了」，不回显 id，也不区分停用与不存在。
 			return nil, errs.InvalidParam("选的规格已经不在了，刷新一下再试")
 		}
 		if !sp.Enabled {
 			return nil, errs.InvalidParam("选的规格已经不在了，刷新一下再试")
 		}
+		label, err := packLabel(*sp, it.MaleCount, i)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, ItemInput{
 			Gender:    sp.Gender,
 			SpecGram:  sp.SpecGram,
-			SpecLabel: sp.SpecLabel,
+			SpecLabel: label,
 			Unit:      sp.Unit,
 			Quantity:  it.Quantity,
 			UnitPrice: sp.UnitPrice,
 		})
 	}
 	return out, nil
+}
+
+// packLabel 把套餐的公母比例写进明细快照。
+//
+// 价格不随比例变（一盒就是一盒的价），比例只是配货信息，所以它只影响 spec_label——
+// 而 spec_label 本来就是快照，卖家发货时照着配就行，日后改价改档都不会动到历史订单。
+// 不是套餐的档原样返回，比例传了也不看。
+func packLabel(sp model.Spec, maleCount *int, idx int) (string, error) {
+	if !sp.IsPack() {
+		return sp.SpecLabel, nil
+	}
+	male := sp.PackSize / 2 // 买家没动过就是默认的一半一半
+	if maleCount != nil {
+		male = *maleCount
+	}
+	if male < 0 || male > sp.PackSize {
+		return "", errs.InvalidParam("items[%d].male_count 应在 0-%d 之间", idx, sp.PackSize)
+	}
+	return fmt.Sprintf("%s（公%d母%d）", sp.SpecLabel, male, sp.PackSize-male), nil
 }

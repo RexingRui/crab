@@ -129,3 +129,13 @@ export function maskName(name) {
   const s = String(name || '');
   return s ? s[0] + '*'.repeat(Math.max(s.length - 1, 1)) : '';
 }
+
+/* 明细行的显示名。套餐（mixed）不加「公母」前缀：一盒里公母都有，
+ * 前缀说不出任何东西，而档名本来就写着盒里装的是什么。
+ * 和后端 model.Order.ItemsSummary 的规矩保持一致。 */
+export function itemName(item) {
+  if (!item) return '';
+  const label = item.spec_label || '';
+  if (item.gender === 'mixed') return label;
+  return `${item.gender_text || ''} ${label}`.trim();
+}

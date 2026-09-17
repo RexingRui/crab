@@ -6,7 +6,7 @@ import StatusTag from '../../components/StatusTag'
 import ShipSheet from '../../components/ShipSheet'
 import PaymentSheet from '../../components/PaymentSheet'
 import api from '../../utils/api'
-import { fenToYuan, formatDate, maskPhone, overdueDays } from '../../utils/format'
+import { fenToYuan, formatDate, maskPhone, overdueDays, itemName } from '../../utils/format'
 import { getTrackUrl, whenReady } from '../../utils/session'
 import { guardDemo } from '../../hooks/useDemoMode'
 import { toast } from '../../utils/request'
@@ -203,7 +203,7 @@ export default function Detail() {
       <View className='section card detail__items'>
         {(order.items || []).map((it, i) => (
           <View className='detail__item' key={`${it.spec_label}-${i}`}>
-            <Text className='detail__item-name'>{it.gender_text} {it.spec_label}</Text>
+            <Text className='detail__item-name'>{itemName(it)}</Text>
             <Text className='detail__item-qty num'>×{it.quantity}</Text>
             <Text className='detail__item-price num'>{fenToYuan(it.unit_price)}</Text>
             <Text className='detail__item-amount num'>{fenToYuan(it.amount)}</Text>

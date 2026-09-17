@@ -169,6 +169,8 @@ type PublicSpecDTO struct {
 	UnitText      string `json:"unit_text"`
 	UnitPrice     int64  `json:"unit_price"`
 	UnitPriceYuan string `json:"unit_price_yuan"`
+	// PackSize 一盒几只，0 表示不是套餐（按只卖）。大于 0 时登记页会让买家调公母比例。
+	PackSize int `json:"pack_size"`
 }
 
 // RegistrationDTO 是买家提交登记后的回执：够他记住单号、核对自己填了什么就行，
@@ -197,6 +199,7 @@ type SpecDTO struct {
 	UnitText      string `json:"unit_text"`
 	UnitPrice     int64  `json:"unit_price"`
 	UnitPriceYuan string `json:"unit_price_yuan"`
+	PackSize      int    `json:"pack_size"`
 	Enabled       bool   `json:"enabled"`
 	SortNo        int    `json:"sort_no"`
 	UpdatedAt     string `json:"updated_at"`
@@ -406,6 +409,7 @@ func ToPublicSpecDTO(s model.Spec) PublicSpecDTO {
 		UnitText:      s.Unit.Text(),
 		UnitPrice:     s.UnitPrice,
 		UnitPriceYuan: model.FormatYuan(s.UnitPrice),
+		PackSize:      s.PackSize,
 	}
 }
 
@@ -444,6 +448,7 @@ func ToSpecDTO(s model.Spec) SpecDTO {
 		UnitText:      s.Unit.Text(),
 		UnitPrice:     s.UnitPrice,
 		UnitPriceYuan: model.FormatYuan(s.UnitPrice),
+		PackSize:      s.PackSize,
 		Enabled:       s.Enabled,
 		SortNo:        s.SortNo,
 		UpdatedAt:     timex.Format(s.UpdatedAt),

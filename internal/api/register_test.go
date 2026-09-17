@@ -179,6 +179,106 @@ func TestRegistrationSameLinkIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestRegistrationPackRatio 套餐的公母比例：买家能调，价格不跟着变，比例写进明细快照。
+func TestRegistrationPackRatio(t *testing.T) {
+	e := newTestEnv(t)
+
+	sp := e.publicSpecIDs(t)[0]
+	if sp.PackSize != 8 {
+		t.Fatalf("种子档应是 8 只装，实际 %d", sp.PackSize)
+	}
+
+	body := registerBody(e.regLink(t, ""), sp.ID, 2, "13900139010")
+	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": 2, "male_count": 6}}
+
+	status, resp, data := e.register(t, body)
+	if status != http.StatusOK || resp.Code != errs.CodeOK {
+		t.Fatalf("登记失败: status=%d code=%d msg=%s", status, resp.Code, resp.Msg)
+	}
+	var reg RegistrationDTO
+	if err := json.Unmarshal(data, &reg); err != nil {
+		t.Fatalf("解析回执失败: %v", err)
+	}
+	// 一盒就是一盒的价，比例怎么调都不影响金额
+	if want := sp.UnitPrice * 2; reg.PayableAmount != want {
+		t.Fatalf("比例改动影响了金额: got=%d want=%d", reg.PayableAmount, want)
+	}
+
+	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
+	if !strings.Contains(o.Items[0].SpecLabel, "公6母2") {
+		t.Fatalf("比例没写进快照: %q", o.Items[0].SpecLabel)
+	}
+	if o.Items[0].Unit != "box" || o.Items[0].Quantity != 2 {
+		t.Fatalf("套餐该按盒记: unit=%s qty=%d", o.Items[0].Unit, o.Items[0].Quantity)
+	}
+}
+
+// TestRegistrationPackRatioDefaults 不传比例就是一半一半，传越界的直接拒。
+func TestRegistrationPackRatioDefaults(t *testing.T) {
+	e := newTestEnv(t)
+	sp := e.publicSpecIDs(t)[0]
+
+	// 不传 male_count → 默认 4 公 4 母
+	body := registerBody(e.regLink(t, ""), sp.ID, 1, "13900139011")
+	_, resp, data := e.register(t, body)
+	if resp.Code != errs.CodeOK {
+		t.Fatalf("登记失败: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	var reg RegistrationDTO
+	_ = json.Unmarshal(data, &reg)
+	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
+	if !strings.Contains(o.Items[0].SpecLabel, "公4母4") {
+		t.Fatalf("默认比例不对: %q", o.Items[0].SpecLabel)
+	}
+
+	// male_count=0 是合法的（整盒都要母的），要和「没传」区分开
+	body = registerBody(e.regLink(t, ""), sp.ID, 1, "13900139012")
+	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": 1, "male_count": 0}}
+	_, resp, data = e.register(t, body)
+	if resp.Code != errs.CodeOK {
+		t.Fatalf("male_count=0 该放行: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	_ = json.Unmarshal(data, &reg)
+	o = decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
+	if !strings.Contains(o.Items[0].SpecLabel, "公0母8") {
+		t.Fatalf("male_count=0 没生效: %q", o.Items[0].SpecLabel)
+	}
+
+	// 超过一盒的只数 → 40001
+	body = registerBody(e.regLink(t, ""), sp.ID, 1, "13900139013")
+	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": 1, "male_count": 9}}
+	status, resp, _ := e.register(t, body)
+	if resp.Code != errs.CodeInvalidParam {
+		t.Fatalf("越界的比例该被拒: status=%d code=%d", status, resp.Code)
+	}
+}
+
+// TestRegistrationMixesPacks 自由搭配：一次登记混几档不同的套餐。
+func TestRegistrationMixesPacks(t *testing.T) {
+	e := newTestEnv(t)
+	specs := e.publicSpecIDs(t)
+
+	body := registerBody(e.regLink(t, ""), specs[0].ID, 1, "13900139014")
+	body["items"] = []map[string]any{
+		{"spec_id": specs[0].ID, "quantity": 2, "male_count": 4},
+		{"spec_id": specs[2].ID, "quantity": 1, "male_count": 8},
+	}
+	_, resp, data := e.register(t, body)
+	if resp.Code != errs.CodeOK {
+		t.Fatalf("混档登记失败: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	var reg RegistrationDTO
+	_ = json.Unmarshal(data, &reg)
+	if want := specs[0].UnitPrice*2 + specs[2].UnitPrice; reg.PayableAmount != want {
+		t.Fatalf("混档金额算错: got=%d want=%d", reg.PayableAmount, want)
+	}
+
+	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
+	if len(o.Items) != 2 {
+		t.Fatalf("该有两条明细，实际 %d", len(o.Items))
+	}
+}
+
 // TestRegistrationDuplicatePhone 换一条链接、同一个手机号，一天内拦下来。
 func TestRegistrationDuplicatePhone(t *testing.T) {
 	e := newTestEnv(t)

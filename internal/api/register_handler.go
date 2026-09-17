@@ -77,6 +77,9 @@ func (a *API) PublicSpecs(w http.ResponseWriter, r *http.Request) {
 type regItemReq struct {
 	SpecID   int64 `json:"spec_id"`
 	Quantity int   `json:"quantity"`
+	// MaleCount 套餐里公的只数。指针是为了区分「没传」和「传了 0」：
+	// 没传用默认的一半一半，传 0 就是整盒都要母的。
+	MaleCount *int `json:"male_count"`
 }
 
 // publicRegisterReq 买家提交的登记。
@@ -112,7 +115,11 @@ func (a *API) PublicRegister(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]service.RegistrationItemInput, 0, len(req.Items))
 	for _, it := range req.Items {
-		items = append(items, service.RegistrationItemInput{SpecID: it.SpecID, Quantity: it.Quantity})
+		items = append(items, service.RegistrationItemInput{
+			SpecID:    it.SpecID,
+			Quantity:  it.Quantity,
+			MaleCount: it.MaleCount,
+		})
 	}
 
 	o, idem, err := a.orders.CreateRegistration(r.Context(), service.RegistrationInput{

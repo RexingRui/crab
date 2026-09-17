@@ -30,8 +30,10 @@ type SpecInput struct {
 	SpecLabel string
 	Unit      model.Unit
 	UnitPrice int64
-	Enabled   *bool
-	SortNo    int
+	// PackSize 一盒几只，0 表示不是套餐。套餐的公母比例由买家定，不在这儿存。
+	PackSize int
+	Enabled  *bool
+	SortNo   int
 }
 
 func (in *SpecInput) validate() error {
@@ -53,8 +55,17 @@ func (in *SpecInput) validate() error {
 	if in.UnitPrice < 0 {
 		return errs.InvalidParam("unit_price 不能为负")
 	}
+	if in.PackSize < 0 || in.PackSize > maxPackSize {
+		return errs.InvalidParam("pack_size 应在 0-%d 之间，0 表示不是套餐", maxPackSize)
+	}
+	if in.PackSize > 0 && in.Unit != model.UnitBox {
+		return errs.InvalidParam("pack_size 大于 0 时 unit 必须是 box")
+	}
 	return nil
 }
+
+// maxPackSize 一盒最多几只。挡住手滑多按几个 0，不是业务上限。
+const maxPackSize = 99
 
 // List 列出规格。onlyEnabled 为 true 时只返回启用中的（小程序录单页下拉用）。
 func (s *SpecService) List(ctx context.Context, onlyEnabled bool) ([]model.Spec, error) {
@@ -79,6 +90,7 @@ func (s *SpecService) Create(ctx context.Context, in SpecInput) (*model.Spec, er
 		SpecLabel: in.SpecLabel,
 		Unit:      in.Unit,
 		UnitPrice: in.UnitPrice,
+		PackSize:  in.PackSize,
 		Enabled:   enabled,
 		SortNo:    in.SortNo,
 		UpdatedAt: s.now(),
@@ -105,6 +117,7 @@ func (s *SpecService) Update(ctx context.Context, id int64, in SpecInput) (*mode
 	sp.SpecLabel = in.SpecLabel
 	sp.Unit = in.Unit
 	sp.UnitPrice = in.UnitPrice
+	sp.PackSize = in.PackSize
 	if in.Enabled != nil {
 		sp.Enabled = *in.Enabled
 	}

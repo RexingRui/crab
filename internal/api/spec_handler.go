@@ -13,6 +13,7 @@ type specReq struct {
 	SpecLabel string       `json:"spec_label"`
 	Unit      model.Unit   `json:"unit"`
 	UnitPrice int64        `json:"unit_price"`
+	PackSize  int          `json:"pack_size"`
 	Enabled   *bool        `json:"enabled"`
 	SortNo    int          `json:"sort_no"`
 }
@@ -24,6 +25,7 @@ func (r specReq) toInput() service.SpecInput {
 		SpecLabel: r.SpecLabel,
 		Unit:      r.Unit,
 		UnitPrice: r.UnitPrice,
+		PackSize:  r.PackSize,
 		Enabled:   r.Enabled,
 		SortNo:    r.SortNo,
 	}

@@ -5,7 +5,7 @@ import DemoBanner from '../DemoBanner'
 import SpecPicker from '../SpecPicker'
 import api from '../../utils/api'
 import { parseAddress, looksLikeAddressText } from '../../utils/address'
-import { fenToYuan, yuanToFen, todayStr } from '../../utils/format'
+import { fenToYuan, yuanToFen, todayStr, itemName } from '../../utils/format'
 import { openidTail, whenReady } from '../../utils/session'
 import { guardDemo } from '../../hooks/useDemoMode'
 import { toast } from '../../utils/request'
@@ -260,7 +260,7 @@ export default function OrderForm({ orderId, clipboardTick = 0 }) {
           ) : (
             items.map((it, index) => (
               <View className='record__item' key={`${it.spec_label}-${index}`}>
-                <Text className='record__item-name'>{it.gender_text} {it.spec_label}</Text>
+                <Text className='record__item-name'>{itemName(it)}</Text>
                 <Text className='record__item-qty num'>×{it.quantity}</Text>
                 <Text className='record__item-price num'>{fenToYuan(it.unit_price)}</Text>
                 <Text className='record__item-amount num'>{fenToYuan(it.unit_price * it.quantity)}</Text>
