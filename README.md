@@ -359,15 +359,25 @@ curl -X POST localhost:8080/api/public/registrations \
 - 落库的 `expect_ship_date` 是买家**希望**的发货日，不能早于今天；卖家改单时可以覆盖。
 - 公开写接口单独限流，默认每 IP 每分钟 5 次（`PUBLIC_WRITE_RATE_LIMIT`），不和查单共用配额。
 
-没有小程序的时候（比如还没发版、手边只有 ssh），在服务器上也能签：
+没有小程序的时候（还没发版、手边只有 ssh），在服务器上也能办：
 
 ```bash
-cd /opt/crab-order && ./scripts/reg-link.sh "老张介绍"
-# https://你的域名/r?t=eyJqdGk...
+cd /opt/crab-order
+./scripts/reg-link.sh "老张介绍"               # 签一条登记链接
+./scripts/admin-api.sh GET '/api/specs?all=1'  # 任意管理员接口
 ```
 
-脚本读 `.env` 的 `AUTH_SECRET` 自签一个 10 分钟有效的管理员 token，调一次 `/api/reg-links`
-就把链接打出来。这是后路，不是日常流程——日常在小程序「记一笔」页点一下就行。
+两个脚本都读 `.env` 的 `AUTH_SECRET` 自签一个 10 分钟有效的管理员 token（格式与
+`internal/auth` 一致）再调接口。**没有新增任何鉴权旁路**——能跑这脚本的人本来就能读
+`.env`，权限没有被放大。这是后路，不是日常流程。
+
+换价目表同理，有现成的 SQL（种子只在 `specs` 表为空时写入，老库升级后要手动换一次）：
+
+```bash
+docker compose exec -T api sqlite3 /data/crab.db < scripts/price-packs.sql
+```
+
+只停用旧档、不物理删除；订单明细是快照，历史金额不受影响。可重复执行。
 
 卖家侧：列表支持 `?source=web` 筛出买家登记的单，CSV 导出多一列「来源」，
 订单卡片和详情页会标出来（灰字，不是彩色标签——它是出处，不是待办）。
