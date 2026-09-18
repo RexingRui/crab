@@ -152,19 +152,29 @@ if [ -f docker-compose.yml ] && command -v docker >/dev/null && docker info >/de
     最常见是 CRAB_DOMAIN 没填或 Caddyfile 语法错，容器起不来 443 上就没人监听。"
         fi
 
-        # ACME 的失败会一条条写在日志里，比猜快得多
-        ACME_ERR="$(docker compose logs --tail 800 caddy 2>/dev/null \
-                    | grep -iE 'error|failed|could not|rate limit|urn:ietf:params:acme' \
-                    | grep -viE 'debug' | tail -n 8)"
-        if [ -n "$ACME_ERR" ]; then
-            bad "caddy 日志里有报错（最近 8 条）："
-            echo "$ACME_ERR" | sed 's/^/      /'
-            suspect "Caddy 申请证书失败，上面的日志就是原因。常见三种：
+        # 只看 warn/error 级别。Caddy 的 info 里有不少带 failed 字样却无害的话
+        # （最典型的是 quic-go 那条 UDP 缓冲区提示），按关键字抓会一路误报成「证书失败」。
+        CADDY_LOG="$(docker compose logs --tail 800 caddy 2>/dev/null)"
+        REAL_ERR="$(echo "$CADDY_LOG" | grep -E '"level":"(error|warn)"' | tail -n 8)"
+        if [ -n "$REAL_ERR" ]; then
+            bad "caddy 日志里有 warn/error（最近 8 条）："
+            echo "$REAL_ERR" | sed 's/^/      /'
+            if echo "$REAL_ERR" | grep -qiE 'acme|certificate|obtain|challenge|rate limit'; then
+                suspect "Caddy 申请证书失败，上面的日志就是原因。常见三种：
     80 端口不通（ACME HTTP-01 验不过）→ 云控制台防火墙放通 TCP 80；
     域名没解析到本机 → 先把 A 记录改对；
     撞了 Let's Encrypt 频率限制（同域名一周 5 次）→ 等一小时再试，别反复重建容器。"
+            else
+                suspect "caddy 日志里有 warn/error，内容见上。不一定和证书有关，先看清楚再动手。"
+            fi
         else
-            ok "caddy 日志里没有明显报错"
+            ok "caddy 日志里没有 warn/error"
+        fi
+
+        # quic-go 的缓冲区提示是 info 级，不是故障，但它证明 HTTP/3 监听是活的
+        if echo "$CADDY_LOG" | grep -q 'receive buffer size'; then
+            warn "日志里有 quic-go 的 UDP 缓冲区提示，说明 HTTP/3 监听开着"
+            info "这条本身是 info 级、不是故障，但配合第 5 节的 alt-svc 一起看"
         fi
     else
         bad "没有 caddy 容器"
@@ -414,21 +424,31 @@ explain_curl() {
 FETCH_FAILED=0
 # 每条路径也打 REPEAT 次：买家说的「刷新几次又能进」就是这里的成功率不到 100%
 for P in /r /t /api/public/specs; do
-    PASS=0; LAST_ERR=0; LAST_CODE=""
-    for _ in $(seq 1 "$REPEAT"); do
+    # 公开接口按 IP 限流（PUBLIC_RATE_LIMIT，默认 20 次/分钟），压几十次必然撞上，
+    # 那是限流在正常工作、不是故障。所以接口只打 3 次，静态页才压满 REPEAT 次。
+    case "$P" in
+        /api/*) TRIES=3 ;;
+        *)      TRIES="$REPEAT" ;;
+    esac
+    PASS=0; LIMITED=0; LAST_ERR=0; LAST_CODE=""
+    for _ in $(seq 1 "$TRIES"); do
         R="$(curl_code "https://$DOMAIN$P")"
         CODE="${R%%|*}"; ERR="${R##*|}"
         if [ "$ERR" = "0" ] && [ "$CODE" = "200" ]; then
             PASS=$((PASS+1))
+        elif [ "$ERR" = "0" ] && [ "$CODE" = "429" ]; then
+            LIMITED=$((LIMITED+1))      # 限流命中，说明链路是通的
         else
             LAST_ERR="$ERR"; LAST_CODE="$CODE"
         fi
     done
 
-    if [ "$PASS" = "$REPEAT" ]; then
-        ok "https://$DOMAIN$P → $PASS/$REPEAT 次 200"
+    if [ "$LIMITED" -gt 0 ] && [ "$((PASS + LIMITED))" = "$TRIES" ]; then
+        ok "https://$DOMAIN$P → $PASS 次 200、$LIMITED 次 429（限流生效，不是故障）"
+    elif [ "$PASS" = "$TRIES" ]; then
+        ok "https://$DOMAIN$P → $PASS/$TRIES 次 200"
     elif [ "$LAST_ERR" != "0" ]; then
-        bad "https://$DOMAIN$P → $PASS/$REPEAT 次成功，失败时：$(explain_curl "$LAST_ERR")"
+        bad "https://$DOMAIN$P → $PASS/$TRIES 次成功，失败时：$(explain_curl "$LAST_ERR")"
         # 前面几节可能都过了，但真去取页面时才炸——这条必须自己算一处可疑，
         # 否则汇总会误报「没发现问题」。三条路径一起挂是同一个毛病，只记一次。
         if [ "$FETCH_FAILED" = "0" ]; then
@@ -438,14 +458,14 @@ for P in /r /t /api/public/specs; do
     这就是买家在 Safari 里看到的那一幕，按上面 TLS / 端口两节的结论先修；
     若那两节都正常，那么问题出在公网到这台机器的路上：防火墙、备案、或中间的 CDN。"
             else
-                suspect "取 https://$DOMAIN 上的页面 $REPEAT 次里成了 $PASS 次，失败时报
+                suspect "取 https://$DOMAIN 上的页面 $TRIES 次里成了 $PASS 次，失败时报
     $(explain_curl "$LAST_ERR")——和「刷新几次又能进去」完全对上。看上面第 1、3、4 节：
     多条 A/AAAA 记录里有坏的、caddy 在反复重启、或 443 上有两个进程在抢，都会这样。
     以上都正常的话，是公网这一段在概率性丢包/重置，国内机器优先怀疑未备案。"
             fi
         fi
     else
-        warn "https://$DOMAIN$P → $PASS/$REPEAT 次成功，失败时 HTTP $LAST_CODE"
+        warn "https://$DOMAIN$P → $PASS/$TRIES 次成功，失败时 HTTP $LAST_CODE"
         [ "$LAST_CODE" = "404" ] && suspect "$P 返回 404：Caddyfile 里的 handle 规则或静态目录挂载不对。
     容器化 Caddy 要求 web/track、web/register 挂进 /srv 下，见 deploy/DOCKER.md 第 5 节。"
     fi
