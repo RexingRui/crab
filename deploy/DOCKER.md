@@ -12,6 +12,7 @@
 | `deploy/Caddyfile` | 容器化 Caddy 的配置：`/api` 反代后端、`/t` 托管买家查单页、`/r` 托管买家登记页 |
 | `scripts/docker-backup.sh` | 宿主机 crontab 调用，在容器里做 SQLite 热备份 |
 | `scripts/deploy.sh` | 更新线上：备份 → 拉代码 → 构建 → 替换 → 自检，不过则自动回滚 |
+| `scripts/tls-check.sh` | 买家页打不开时逐层排查 HTTPS：域名 → DNS → 容器 → 端口 → 证书 → 页面 |
 
 ## 腾讯云轻量应用服务器
 
@@ -220,6 +221,20 @@ docker compose --profile proxy up -d
 其余路径一律 404。证书存在 `caddy-data` 卷里，
 **别随手 `docker compose down -v`**，删了要重新申请，会撞 ACME 频率限制。
 
+对外只宣告 HTTP/1.1 + HTTP/2，**默认不开 HTTP/3**：云控制台的防火墙默认只放通 TCP 80/443，
+而 Safari 一看到 `Alt-Svc` 里的 h3 就会转去试 QUIC（UDP 443），包被静默丢掉时它不一定退回 TCP，
+页面就停在「无法与服务器建立安全连接」。确实在控制台放通了 UDP 443 再打开：
+
+```bash
+echo 'CRAB_PROTOCOLS=h1 h2 h3' >> .env && docker compose --profile proxy up -d
+```
+
+起完之后验一遍，它会把域名、DNS、端口、证书、页面逐层走一遍：
+
+```bash
+./scripts/tls-check.sh
+```
+
 ### 方案 B：宿主机上已经有 Nginx / Caddy
 
 后端已经映射在 `127.0.0.1:8080`，直接反代过去即可。Nginx 大致长这样：
@@ -337,6 +352,26 @@ docker image prune -f
 腾讯云 TCR，服务器侧改成 `docker compose pull && up -d` 即可，`deploy.sh` 的骨架不用变。
 
 ## 常见问题
+
+**买家说页面打不开：Safari「无法与服务器建立安全连接」/ Chrome `ERR_SSL_PROTOCOL_ERROR`**
+TCP 通了但 TLS 没握上手，先跑排查脚本，它会直接指出是哪一层：
+
+```bash
+cd /opt/crab-order && ./scripts/tls-check.sh
+```
+
+按出现频率，原因就这么几种：
+
+| 现象 | 原因 | 怎么修 |
+|---|---|---|
+| 握手阶段连接被重置，端口和证书都正常 | **域名没备案**。未备案域名解析到国内主机，443 的握手会被直接掐断 | 轻量云控制台申请备案服务码，等下来即好。备案前只能用小程序侧（开发者工具勾「不校验合法域名」）自测 |
+| 证书颁发者是 `Caddy Local Authority` | Caddy 没签到公网证书，退回了自签的内部 CA，浏览器一律不认 | 看 `docker compose logs caddy`：多半是 80 没放通（HTTP-01 验不过）、域名没解析到本机，或撞了 ACME 频率限制（同域名一周 5 次，别反复重建容器） |
+| 证书上的域名和链接里的域名对不上 | 发出去的链接带了 `www.` 之类的前缀，而 `CRAB_DOMAIN` 没有 | 两者必须完全一致；真要两个域名都能开，就在 `deploy/Caddyfile` 的站点地址里写成 `域名A, 域名B` |
+| 只有 Safari / 只有 iPhone 打不开 | 宣告了 HTTP/3 但 UDP 443 不通 | 控制台放通 UDP 443，或确认 `CRAB_PROTOCOLS` 用默认的 `h1 h2`（见上面第 5 节） |
+| `CRAB_DOMAIN` 是 IP 或没填 | Caddy 签不出证书，甚至整个容器起不来 | `.env` 里填成已解析到本机的域名，`docker compose --profile proxy up -d` |
+| 域名解析到了 CDN | 证书归 CDN 管，源站这边的 Caddy 证书不生效 | 在 CDN 控制台上传/申请证书，或把解析改回源站 |
+
+页面能开但接口报错是另一回事，看 `docker compose logs api`。
 
 **容器反复重启，日志说 `AUTH_SECRET 必须配置，且至少 32 个字符`**
 `.env` 里没填、短于 32 字符，或者行尾写了注释。`grep -n '^AUTH_SECRET' .env` 看一眼，
