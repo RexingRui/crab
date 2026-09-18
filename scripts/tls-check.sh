@@ -480,6 +480,24 @@ for P in /r /t /api/public/specs; do
     fi
 done
 
+# 未备案拦截：国内云厂商会把 HTTP 请求跳到自家的拦截页（腾讯云是
+# dnspod.qcloud.com/static/webblock.html）。HTTPS 那边没法这么跳——要跳就得
+# 伪造证书——所以直接握不上手，在 Safari 里就是「无法建立安全连接」。
+# 这也是为什么同一个故障在 http 上看到的是拦截页、在 https 上看到的是 TLS 报错。
+BLOCK_URL="$(curl -sSL --max-time "$TIMEOUT" -o /dev/null -w '%{url_effective}' \
+             "http://$DOMAIN/t" 2>/dev/null)"
+case "$BLOCK_URL" in
+    *webblock*|*beian*|*aliyun.com/static*|*qcloud.com/static*)
+        bad "HTTP 请求被跳到了拦截页：$BLOCK_URL"
+        suspect "域名未备案，被云厂商拦了。这是国内主机上最常见的原因，也最容易误诊——
+    HTTP 会被跳到拦截页，HTTPS 没法伪造证书去跳，于是直接握不上手，
+    在 Safari 里显示成「无法与服务器建立安全连接」，看起来像证书或 TLS 的毛病。
+    偶尔能打开是因为拦截不是 100% 命中，漏过去的连接就正常了。
+    服务端这边查不出任何问题（本机自测流量不经过拦截），改证书、关 HTTP/3 全都没用。
+    唯一的解法是办备案：云控制台申请备案服务码，免费，一般十来天。"
+        ;;
+esac
+
 # Caddy 会回 Server: Caddy。回的是别的东西，说明请求压根没到我们这套里来
 SRV="$(curl -sSI --max-time "$TIMEOUT" "https://$DOMAIN/r" 2>/dev/null \
        | grep -i '^server:' | tr -d '\r' | cut -d' ' -f2-)"
