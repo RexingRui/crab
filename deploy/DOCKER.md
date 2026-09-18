@@ -381,6 +381,75 @@ cd /opt/crab-order && ./scripts/tls-check.sh
 | 脚本报「应答的不是 Caddy」 | 中间还隔着一层：宿主机的 Nginx、云厂商 CDN / 负载均衡，或买家自己开着网络代理 | 证书归那一层管，先确定那层是谁；买家侧先让他关掉 VPN / 代理再试 |
 | 以上都正常，只有取页面时概率性失败 | 公网这一段在概率性重置 | 国内机器优先怀疑未备案；也可能是宣告了 HTTP/3 而 UDP 443 不通（见上面第 5 节） |
 
+#### 时好时坏的三种，怎么修
+
+按「先确认再动手」的顺序，每种都给了验证方法——没验证过就别认为修好了，
+这种十几次才中一次的毛病，凭感觉判断「好像好了」最容易误判。
+
+**一、域名有 AAAA 记录（IPv6）**
+
+compose 的端口映射默认只绑 IPv4，AAAA 却指着这台机器，于是 IPv6 那条路没人应答。
+Safari 每开一条新连接都要在 v4/v6 之间赛跑（Happy Eyeballs），v6 赢了就报错。
+
+```bash
+dig AAAA 你的域名 +short        # 有输出就是有 AAAA 记录
+```
+
+去 DNS 控制台（腾讯云是 DNSPod → 解析 → 记录管理）**删掉 AAAA 记录**，只留 A。
+等 TTL 过期后确认：
+
+```bash
+dig AAAA 你的域名 +short        # 应该没有输出
+```
+
+真要支持 IPv6 是另一件事：Docker daemon 要开 `"ipv6": true`、端口映射绑 `[::]`、
+云防火墙也要放通 v6——为了这个页面不值得，删记录就好。
+
+**二、443 上有两套服务在应答**
+
+宿主机上原来装的 Nginx/Caddy 没停，又起了容器化 Caddy。新连接被分到哪套是随机的，
+分到没有正确证书的那套就握手失败。
+
+```bash
+ss -lntp | grep :443            # 看有几个进程
+```
+
+两套只能留一套。**留容器化 Caddy**（对应本文方案 A）：
+
+```bash
+sudo systemctl stop nginx && sudo systemctl disable nginx
+docker compose --profile proxy up -d
+```
+
+**留宿主机的 Nginx**（对应方案 B），那就别起 proxy profile：
+
+```bash
+docker compose stop caddy       # 不要用 down -v，证书卷删了要重新申请
+```
+
+改完再看一眼，`:443` 上应该只剩一个进程；脚本第 4 节的证书指纹也应该只有一张。
+
+**三、还在宣告 HTTP/3**
+
+Safari 缓存了 `Alt-Svc` 之后，下次开页面会先试 QUIC（UDP 443），云防火墙默认不放通 UDP，
+它不一定退回 TCP。
+
+```bash
+curl -sI https://你的域名/r | grep -i alt-svc      # 有 h3 就是还开着
+```
+
+新版 Caddyfile 已经默认只宣告 `h1 h2`，但**挂载进容器的配置文件改了不会自动重载**，
+要强制重建容器才生效：
+
+```bash
+cd /opt/crab-order && git pull
+docker compose --profile proxy up -d --force-recreate caddy
+curl -sI https://你的域名/r | grep -i alt-svc      # 应该没有输出了
+```
+
+服务端关掉之后，手机上那份缓存还在，得清一次才不会继续试 QUIC：
+iPhone 设置 → Safari → 高级 → 网站数据 → 找到这个域名删掉。
+
 一直打不开的，按出现频率是这几种：
 
 | 现象 | 原因 | 怎么修 |
