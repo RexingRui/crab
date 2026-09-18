@@ -12,14 +12,15 @@
 # 环境变量：
 #   CRAB_DOMAIN     要检查的域名，默认读 .env 里的同名键；也可以用第一个参数给
 #   TIMEOUT         单次探测的超时秒数，默认 8
-#   REPEAT          每个地址重复握手的次数，默认 5。「刷新几次又能进」这种
-#                   时好时坏的毛病，就靠这个把偶发率测出来
+#   REPEAT          每个地址重复握手的次数，默认 10。「刷新几次又能进」这种
+#                   时好时坏的毛病，就靠这个把偶发率测出来；十几次才中一次的
+#                   用 REPEAT=50 多打几轮，才抓得到那一次失败的原话
 set -uo pipefail          # 故意不开 -e：每一项都要跑完，不能中途退出
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 TIMEOUT="${TIMEOUT:-8}"
-REPEAT="${REPEAT:-5}"
+REPEAT="${REPEAT:-10}"
 SUSPECTS=()               # 攒下「可疑点 → 怎么修」，最后统一打印
 
 ok()   { echo "  ✓ $*"; }
@@ -244,14 +245,27 @@ hs_once() {
     echo | timeout "$TIMEOUT" openssl s_client -connect "${h}:443" -servername "$DOMAIN" 2>&1
 }
 
-# 每个地址打 REPEAT 次。时好时坏的毛病只握一次手是照不出来的。
+# 每个地址打 REPEAT 次全新握手（openssl 每次都是新进程，不会复用会话，
+# 正好对应浏览器「新开页面」那一下）。十几次才中一次的毛病，握一次手照不出来。
 BEST_IP=""
 if [ -n "$ALL_IPS" ] && command -v openssl >/dev/null; then
     for IP in $ALL_IPS; do
         PASS=0
+        FAIL_SAMPLE=""       # 偶发失败时，把那一次的原始输出留下来——这才是断案的东西
+        FPS=""               # 每次拿到的证书指纹，用来看是不是同一套服务在应答
         for _ in $(seq 1 "$REPEAT"); do
-            hs_once "$IP" | grep -q 'BEGIN CERTIFICATE' && PASS=$((PASS+1))
+            OUT="$(hs_once "$IP")"
+            if echo "$OUT" | grep -q 'BEGIN CERTIFICATE'; then
+                PASS=$((PASS+1))
+                FP="$(echo "$OUT" | sed -n '/BEGIN CERTIFICATE/,/END CERTIFICATE/p' \
+                      | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)"
+                FPS="$FPS$FP
+"
+            else
+                [ -z "$FAIL_SAMPLE" ] && FAIL_SAMPLE="$OUT"
+            fi
         done
+
         if [ "$PASS" = "$REPEAT" ]; then
             ok "$IP 握手 $PASS/$REPEAT 成功"
             [ -z "$BEST_IP" ] && BEST_IP="$IP"
@@ -260,12 +274,29 @@ if [ -n "$ALL_IPS" ] && command -v openssl >/dev/null; then
         else
             bad "$IP 握手 $PASS/$REPEAT——时好时坏"
             [ -z "$BEST_IP" ] && BEST_IP="$IP"
-            suspect "同一个地址 $IP 上，$REPEAT 次握手成了 $PASS 次。这种概率性失败
-    对应你说的「刷新几次又能进」，常见三种：
-    一是服务端 443 上不止一个进程在抢（宿主机自己的 Nginx/Caddy 和容器里的 Caddy 都开着），
-      服务器上 ss -lntp | grep :443 看是不是两个 PID；
-    二是未备案域名被概率性掐断（国内机器），备案下来即好；
-    三是机器负载高时握手超时，看 docker stats 和内存。"
+            suspect "同一个地址 $IP 上，$REPEAT 次全新握手成了 $PASS 次。
+    失败只发生在新建连接那一下，页面里后续的接口调用走的是已建好的连接，所以不受影响——
+    和「只有打开页面时偶发、提交之后一路正常」完全吻合。看下面那段失败样本定原因。"
+        fi
+
+        # 偶发失败的原始输出：alert 码 / reset / timeout，一眼定性
+        if [ -n "$FAIL_SAMPLE" ]; then
+            info "$IP 失败样本（第一次失败时 openssl 的原话）："
+            echo "$FAIL_SAMPLE" | grep -iE 'alert|error|reset|refused|timeout|no peer|errno' \
+                | head -n 4 | sed 's/^/        /'
+            [ -z "$(echo "$FAIL_SAMPLE" | grep -iE 'alert|error|reset|refused|timeout|no peer|errno')" ] \
+                && echo "$FAIL_SAMPLE" | head -n 4 | sed 's/^/        /'
+        fi
+
+        # 同一个地址上冒出两张不同的证书，说明 443 后面不止一套服务
+        UNIQ_FP="$(echo "$FPS" | grep -v '^$' | sort -u | grep -c .)"
+        if [ "${UNIQ_FP:-0}" -gt 1 ]; then
+            bad "$IP 上先后拿到 $UNIQ_FP 张不同的证书"
+            echo "$FPS" | grep -v '^$' | sort -u | sed 's/^/        /'
+            suspect "同一个地址返回了 $UNIQ_FP 张不同的证书，说明 443 后面有不止一套服务在应答
+    （宿主机的 Nginx/Caddy 和容器化 Caddy 都绑着，或者前面还有一层负载均衡）。
+    新建连接被分到哪一套是随机的，分到没有正确证书的那套就报「无法建立安全连接」，
+    而已经建好的连接不受影响——正好是你看到的现象。两套反代只能留一套。"
         fi
     done
     [ -z "$BEST_IP" ] && BEST_IP="$TARGET_IP"
