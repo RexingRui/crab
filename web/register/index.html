@@ -488,8 +488,35 @@ button.go:disabled{opacity:.45}
       free: f,
       crabs: p.crabs + f.crabs,
       amount: p.amount + f.amount,
-      items: p.items.concat(f.items)
+      items: mergeItems(p.items.concat(f.items))
     }
+  }
+
+  // 同一档在两边都选了就合成一条，否则明细会出现两行一模一样的 ×1，
+  // 卖家配货时得自己把它们加起来。金额不受影响：8a+b 只拆出来还是 a 盒加 b 只。
+  function mergeItems(items) {
+    var byId = {}
+    var order = []
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i]
+      var key = String(it.spec_id)
+      if (!byId[key]) {
+        byId[key] = { spec_id: it.spec_id, quantity: 0, male_count: 0 }
+        order.push(key)
+      }
+      byId[key].quantity += it.quantity
+      byId[key].male_count += maleOfItem(it)
+    }
+    var out = []
+    for (var k = 0; k < order.length; k++) out.push(byId[order[k]])
+    return out
+  }
+
+  // 没写 male_count 的（套餐那条）按后端的默认值算：一半一半。
+  // 合并后要显式写出来，不然后端会按合并后的总数再取一半，和分开时不一定一样。
+  function maleOfItem(it) {
+    if (it.male_count != null) return it.male_count
+    return Math.floor(it.quantity / 2)
   }
 
   function total() {
