@@ -7,6 +7,15 @@
 {
 	# 想收到证书过期提醒就把下面这行的注释去掉并填自己的邮箱
 	# email you@example.com
+
+	# 默认只开 HTTP/1.1 + HTTP/2，不宣告 HTTP/3。
+	# 云控制台的防火墙默认只放通 TCP 80/443；一旦 Caddy 在 Alt-Svc 里宣告了 h3，
+	# Safari 会转去试 QUIC（UDP 443），包被静默丢掉时它不一定退回 TCP，
+	# 页面就停在「无法与服务器建立安全连接」上。
+	# 确实在控制台放通了 UDP 443，再在 .env 里写 CRAB_PROTOCOLS=h1 h2 h3 打开。
+	servers {
+		protocols {$CRAB_PROTOCOLS:h1 h2}
+	}
 }
 
 {$CRAB_DOMAIN} {

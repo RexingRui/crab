@@ -12,6 +12,7 @@
 | `deploy/Caddyfile` | 容器化 Caddy 的配置：`/api` 反代后端、`/t` 托管买家查单页、`/r` 托管买家登记页 |
 | `scripts/docker-backup.sh` | 宿主机 crontab 调用，在容器里做 SQLite 热备份 |
 | `scripts/deploy.sh` | 更新线上：备份 → 拉代码 → 构建 → 替换 → 自检，不过则自动回滚 |
+| `scripts/tls-check.sh` | 买家页打不开时逐层排查 HTTPS：域名 → DNS → 容器 → 端口 → 证书 → 页面 |
 
 ## 腾讯云轻量应用服务器
 
@@ -220,6 +221,20 @@ docker compose --profile proxy up -d
 其余路径一律 404。证书存在 `caddy-data` 卷里，
 **别随手 `docker compose down -v`**，删了要重新申请，会撞 ACME 频率限制。
 
+对外只宣告 HTTP/1.1 + HTTP/2，**默认不开 HTTP/3**：云控制台的防火墙默认只放通 TCP 80/443，
+而 Safari 一看到 `Alt-Svc` 里的 h3 就会转去试 QUIC（UDP 443），包被静默丢掉时它不一定退回 TCP，
+页面就停在「无法与服务器建立安全连接」。确实在控制台放通了 UDP 443 再打开：
+
+```bash
+echo 'CRAB_PROTOCOLS=h1 h2 h3' >> .env && docker compose --profile proxy up -d
+```
+
+起完之后验一遍，它会把域名、DNS、端口、证书、页面逐层走一遍：
+
+```bash
+./scripts/tls-check.sh
+```
+
 ### 方案 B：宿主机上已经有 Nginx / Caddy
 
 后端已经映射在 `127.0.0.1:8080`，直接反代过去即可。Nginx 大致长这样：
@@ -337,6 +352,116 @@ docker image prune -f
 腾讯云 TCR，服务器侧改成 `docker compose pull && up -d` 即可，`deploy.sh` 的骨架不用变。
 
 ## 常见问题
+
+**买家说页面打不开：Safari「无法与服务器建立安全连接」/ Chrome `ERR_SSL_PROTOCOL_ERROR`**
+TCP 通了但 TLS 没握上手，先跑排查脚本，它会直接指出是哪一层：
+
+```bash
+cd /opt/crab-order && ./scripts/tls-check.sh
+```
+
+脚本会把每个地址、每条路径各打 10 次（`REPEAT=` 可调），所以**时好时坏也照得出来**。
+十几次才中一次的用 `REPEAT=50 ./scripts/tls-check.sh`，它会把失败那一次 openssl 的原话留下来。
+
+一条重要的分界线：**失败只在打开页面时出现、页面里后续的接口调用一路正常**，
+说明毛病只在「新建连接的第一次完整握手」，后续请求走已建好的连接（keep-alive / 会话复用）
+所以不受影响。这反过来排除了证书错、域名不匹配、未备案这类稳定因素——它们会次次失败。
+该查的是浏览器为新连接做选择的那一步：挑地址（IPv4/IPv6）、挑协议（h2/h3）、以及
+443 后面是不是有不止一套服务在轮流应答。
+
+
+「刷新几次又能进去」是另一类原因，别和「一直打不开」混为一谈：
+
+| 时好时坏的现象 | 原因 | 怎么修 |
+|---|---|---|
+| 域名有 AAAA 记录，脚本报「IPv4 握得上手，IPv6 握不上」 | Safari 的 Happy Eyeballs 优先试 IPv6。compose 的端口映射默认只绑 IPv4，AAAA 却指着这台机器，于是 IPv6 那条路没人应答 | 删掉 AAAA 记录，或让 IPv6 上也真的提供服务 |
+| 多条 A 记录，脚本报其中某个地址 443 不通 | 浏览器每次随机挑一个，挑中坏的就报错 | 删掉 DNS 里过期/多余的记录，只留这台机器 |
+| 脚本报 caddy 重启过很多次 | 容器在崩溃重启，每次重启的几秒内 443 没人监听 | `docker compose logs caddy` 找崩溃原因 |
+| 同一地址握手 `3/5` 这种 | 443 上两个进程在抢（宿主机的 Nginx/Caddy 和容器里的 Caddy 都开着），或机器负载高握手超时 | 脚本第 2 节会列出 443 上的进程；两套反代只能留一套，或 `docker stats` 看负载 |
+| 脚本报「应答的不是 Caddy」 | 中间还隔着一层：宿主机的 Nginx、云厂商 CDN / 负载均衡，或买家自己开着网络代理 | 证书归那一层管，先确定那层是谁；买家侧先让他关掉 VPN / 代理再试 |
+| 以上都正常，只有取页面时概率性失败 | 公网这一段在概率性重置 | 国内机器优先怀疑未备案；也可能是宣告了 HTTP/3 而 UDP 443 不通（见上面第 5 节） |
+
+#### 时好时坏的三种，怎么修
+
+按「先确认再动手」的顺序，每种都给了验证方法——没验证过就别认为修好了，
+这种十几次才中一次的毛病，凭感觉判断「好像好了」最容易误判。
+
+**一、域名有 AAAA 记录（IPv6）**
+
+compose 的端口映射默认只绑 IPv4，AAAA 却指着这台机器，于是 IPv6 那条路没人应答。
+Safari 每开一条新连接都要在 v4/v6 之间赛跑（Happy Eyeballs），v6 赢了就报错。
+
+```bash
+dig AAAA 你的域名 +short        # 有输出就是有 AAAA 记录
+```
+
+去 DNS 控制台（腾讯云是 DNSPod → 解析 → 记录管理）**删掉 AAAA 记录**，只留 A。
+等 TTL 过期后确认：
+
+```bash
+dig AAAA 你的域名 +short        # 应该没有输出
+```
+
+真要支持 IPv6 是另一件事：Docker daemon 要开 `"ipv6": true`、端口映射绑 `[::]`、
+云防火墙也要放通 v6——为了这个页面不值得，删记录就好。
+
+**二、443 上有两套服务在应答**
+
+宿主机上原来装的 Nginx/Caddy 没停，又起了容器化 Caddy。新连接被分到哪套是随机的，
+分到没有正确证书的那套就握手失败。
+
+```bash
+ss -lntp | grep :443            # 看有几个进程
+```
+
+两套只能留一套。**留容器化 Caddy**（对应本文方案 A）：
+
+```bash
+sudo systemctl stop nginx && sudo systemctl disable nginx
+docker compose --profile proxy up -d
+```
+
+**留宿主机的 Nginx**（对应方案 B），那就别起 proxy profile：
+
+```bash
+docker compose stop caddy       # 不要用 down -v，证书卷删了要重新申请
+```
+
+改完再看一眼，`:443` 上应该只剩一个进程；脚本第 4 节的证书指纹也应该只有一张。
+
+**三、还在宣告 HTTP/3**
+
+Safari 缓存了 `Alt-Svc` 之后，下次开页面会先试 QUIC（UDP 443），云防火墙默认不放通 UDP，
+它不一定退回 TCP。
+
+```bash
+curl -sI https://你的域名/r | grep -i alt-svc      # 有 h3 就是还开着
+```
+
+新版 Caddyfile 已经默认只宣告 `h1 h2`，但**挂载进容器的配置文件改了不会自动重载**，
+要强制重建容器才生效：
+
+```bash
+cd /opt/crab-order && git pull
+docker compose --profile proxy up -d --force-recreate caddy
+curl -sI https://你的域名/r | grep -i alt-svc      # 应该没有输出了
+```
+
+服务端关掉之后，手机上那份缓存还在，得清一次才不会继续试 QUIC：
+iPhone 设置 → Safari → 高级 → 网站数据 → 找到这个域名删掉。
+
+一直打不开的，按出现频率是这几种：
+
+| 现象 | 原因 | 怎么修 |
+|---|---|---|
+| 握手阶段连接被重置，端口和证书都正常 | **域名没备案**。未备案域名解析到国内主机，443 的握手会被直接掐断 | 轻量云控制台申请备案服务码，等下来即好。备案前只能用小程序侧（开发者工具勾「不校验合法域名」）自测 |
+| 证书颁发者是 `Caddy Local Authority` | Caddy 没签到公网证书，退回了自签的内部 CA，浏览器一律不认 | 看 `docker compose logs caddy`：多半是 80 没放通（HTTP-01 验不过）、域名没解析到本机，或撞了 ACME 频率限制（同域名一周 5 次，别反复重建容器） |
+| 证书上的域名和链接里的域名对不上 | 发出去的链接带了 `www.` 之类的前缀，而 `CRAB_DOMAIN` 没有 | 两者必须完全一致；真要两个域名都能开，就在 `deploy/Caddyfile` 的站点地址里写成 `域名A, 域名B` |
+| 只有 Safari / 只有 iPhone 打不开 | 宣告了 HTTP/3 但 UDP 443 不通 | 控制台放通 UDP 443，或确认 `CRAB_PROTOCOLS` 用默认的 `h1 h2`（见上面第 5 节） |
+| `CRAB_DOMAIN` 是 IP 或没填 | Caddy 签不出证书，甚至整个容器起不来 | `.env` 里填成已解析到本机的域名，`docker compose --profile proxy up -d` |
+| 域名解析到了 CDN | 证书归 CDN 管，源站这边的 Caddy 证书不生效 | 在 CDN 控制台上传/申请证书，或把解析改回源站 |
+
+页面能开但接口报错是另一回事，看 `docker compose logs api`。
 
 **容器反复重启，日志说 `AUTH_SECRET 必须配置，且至少 32 个字符`**
 `.env` 里没填、短于 32 字符，或者行尾写了注释。`grep -n '^AUTH_SECRET' .env` 看一眼，

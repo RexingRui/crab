@@ -537,6 +537,9 @@ sudo systemctl daemon-reload && sudo systemctl enable --now crab-order
 ```
 
 - **HTTPS**：微信小程序强制要求 HTTPS 且域名需在小程序后台配置。生产由 Caddy 或 Nginx 反代并自动签证书，Go 服务只监听 `127.0.0.1:8080`（把 `HTTP_ADDR` 设成 `127.0.0.1:8080`）。
+  买家说页面打不开（Safari 报「无法与服务器建立安全连接」）时，`make tls-check` 会把域名、DNS、
+  容器、端口、证书、页面逐层验一遍并指出是哪一层，逐条对照见
+  [deploy/DOCKER.md 常见问题](deploy/DOCKER.md#常见问题)。
 - **买家页**：后端不托管静态文件，由反代把 `/t` 指到 `web/track/index.html`、
   `/r` 指到 `web/register/index.html`，`/api` 反代到 Go。同源，不涉及 CORS。
   顺手给这两条都加上 `X-Robots-Tag: noindex`。

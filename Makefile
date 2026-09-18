@@ -1,5 +1,5 @@
 .PHONY: build run test test-race cover fmt vet tidy clean \
-	docker-init docker-build docker-up docker-down docker-restart docker-logs docker-ps docker-backup deploy \
+	docker-init docker-build docker-up docker-down docker-restart docker-logs docker-ps docker-backup tls-check deploy \
 	mp-build mp-preview mp-upload
 
 BIN := bin/crab-server
@@ -59,6 +59,10 @@ docker-ps:
 
 docker-backup:
 	./scripts/docker-backup.sh
+
+# 买家 H5 页打不开（Safari「无法与服务器建立安全连接」）时逐层排查 HTTPS
+tls-check:
+	./scripts/tls-check.sh
 
 # 线上更新：备份 → 拉代码 → 构建 → 滚动替换 → /healthz 自检，不过就自动回滚
 deploy:

@@ -60,10 +60,13 @@ services:
     ports:
       - "80:80"      # ACME HTTP-01 验证与 HTTP→HTTPS 跳转要用
       - "443:443"
-      - "443:443/udp"
+      - "443:443/udp"   # 只有开了 HTTP/3（CRAB_PROTOCOLS 含 h3）才用得上
     environment:
       # 必填，且域名要已经解析到这台机器，否则签不出证书
       CRAB_DOMAIN: ${CRAB_DOMAIN:-}
+      # 对外宣告的 HTTP 版本。默认不含 h3：云防火墙默认不放通 UDP 443，
+      # 而 Safari 见到 h3 就会去试 QUIC，试不通时页面直接报连不上安全连接。
+      CRAB_PROTOCOLS: ${CRAB_PROTOCOLS:-h1 h2}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./web/track:/srv/track:ro         # 买家查单页，静态文件
