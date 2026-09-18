@@ -48,3 +48,34 @@
 		respond "Not Found" 404
 	}
 }
+
+# ---------- 诊断用，默认关闭 ----------
+# 用公网 IP 直连测试：http://<公网IP>/diag 应当返回 ip-ok。
+#
+# 它和域名访问走同一个端口、同一个进程，只差一个域名，所以是一组干净的对照：
+#   IP 能通、域名不通  → 域名在链路上被拦（国内主机首先怀疑未备案）
+#   两个都不通          → 机器或防火墙的问题，与域名无关
+#
+# 打开：.env 里写 CRAB_DIAG_IP=你的公网IP，然后
+#       docker compose --profile proxy up -d --force-recreate caddy
+# 测完把这行从 .env 删掉再执行一次，别长期开着。
+#
+# 只放 /t（查单页，不带敏感参数）和 /diag。登记页 /r 的 token 在 URL 里，
+# 明文 HTTP 上会被看光，所以这里不提供。
+http://{$CRAB_DIAG_IP:diag-disabled.invalid} {
+	handle /diag {
+		respond "ip-ok" 200
+	}
+
+	handle /t* {
+		header X-Robots-Tag noindex
+		rewrite * /index.html
+		file_server {
+			root /srv/track
+		}
+	}
+
+	handle {
+		respond "Not Found" 404
+	}
+}
