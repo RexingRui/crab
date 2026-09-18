@@ -12,11 +12,14 @@
 # 环境变量：
 #   CRAB_DOMAIN     要检查的域名，默认读 .env 里的同名键；也可以用第一个参数给
 #   TIMEOUT         单次探测的超时秒数，默认 8
+#   REPEAT          每个地址重复握手的次数，默认 5。「刷新几次又能进」这种
+#                   时好时坏的毛病，就靠这个把偶发率测出来
 set -uo pipefail          # 故意不开 -e：每一项都要跑完，不能中途退出
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 TIMEOUT="${TIMEOUT:-8}"
+REPEAT="${REPEAT:-5}"
 SUSPECTS=()               # 攒下「可疑点 → 怎么修」，最后统一打印
 
 ok()   { echo "  ✓ $*"; }
@@ -68,27 +71,50 @@ fi
 # ---------- 1. DNS ----------
 head_ "1. DNS 解析"
 
-resolve() {
+resolve4() {
     if command -v dig >/dev/null; then dig +short +time=3 +tries=1 "$1" A | grep -E '^[0-9.]+$'
     elif command -v host >/dev/null; then host -t A "$1" 2>/dev/null | awk '/has address/{print $NF}'
     else getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u
     fi
 }
-IPS="$(resolve "$DOMAIN")"
-if [ -z "$IPS" ]; then
-    bad "解析不到 A 记录"
+resolve6() {
+    if command -v dig >/dev/null; then dig +short +time=3 +tries=1 "$1" AAAA | grep -E '^[0-9a-fA-F:]+:[0-9a-fA-F:]*$'
+    elif command -v host >/dev/null; then host -t AAAA "$1" 2>/dev/null | awk '/has IPv6 address/{print $NF}'
+    else getent ahostsv6 "$1" 2>/dev/null | awk '{print $1}' | sort -u
+    fi
+}
+IPS="$(resolve4 "$DOMAIN")"
+IPS6="$(resolve6 "$DOMAIN")"
+ALL_IPS="$(printf '%s\n%s\n' "$IPS" "$IPS6" | grep -v '^$')"
+
+if [ -z "$ALL_IPS" ]; then
+    bad "解析不到 A / AAAA 记录"
     suspect "域名没有解析记录，或解析还没生效。先把 A 记录指到这台机器的公网 IP。"
     TARGET_IP=""
 else
-    ok "解析到：$(echo "$IPS" | tr '\n' ' ')"
-    TARGET_IP="$(echo "$IPS" | head -n1)"
+    [ -n "$IPS" ]  && ok "A 记录：$(echo "$IPS" | tr '\n' ' ')"
+    [ -z "$IPS" ]  && bad "没有 A 记录"
+    [ -n "$IPS6" ] && ok "AAAA 记录：$(echo "$IPS6" | tr '\n' ' ')"
+    TARGET_IP="$(echo "$ALL_IPS" | head -n1)"
+fi
+
+# 多个 A 记录时，只要有一个指着坏机器，浏览器就会「有时候能开有时候不能」
+if [ "$(echo "$IPS" | grep -c .)" -gt 1 ]; then
+    warn "有多条 A 记录，浏览器会随机挑一个"
+    info "下面第 3、4 节会逐个地址验，只要有一个不通，就是时好时坏的原因"
+fi
+
+# AAAA 同理，而且更隐蔽：Safari 的 Happy Eyeballs 优先试 IPv6
+if [ -n "$IPS6" ]; then
+    warn "域名有 AAAA 记录（IPv6）"
+    info "Safari 会优先走 IPv6，它不通时才退回 IPv4——退不干净就是时好时坏"
 fi
 
 # 在服务器上顺手核一下解析是不是指着自己；指到别处（比如挂了 CDN）就是另一套证书了
 MYIP="$(curl -fsS --max-time "$TIMEOUT" https://ifconfig.me 2>/dev/null \
         || curl -fsS --max-time "$TIMEOUT" https://api.ipify.org 2>/dev/null)"
 if [ -n "$MYIP" ] && [ -n "$TARGET_IP" ]; then
-    if echo "$IPS" | grep -qx "$MYIP"; then
+    if echo "$ALL_IPS" | grep -qx "$MYIP"; then
         ok "解析指向本机公网 IP（$MYIP）"
     else
         warn "本机公网 IP 是 $MYIP，域名却解析到 $TARGET_IP"
@@ -108,6 +134,17 @@ if [ -f docker-compose.yml ] && command -v docker >/dev/null && docker info >/de
         STATE="$(docker inspect -f '{{.State.Status}}' "$(docker compose ps -q caddy)" 2>/dev/null)"
         if [ "$STATE" = "running" ]; then
             ok "caddy 容器 running"
+            # 反复重启的容器会有几秒钟 443 上没人听，表现就是时好时坏
+            CID="$(docker compose ps -q caddy)"
+            RESTARTS="$(docker inspect -f '{{.RestartCount}}' "$CID" 2>/dev/null)"
+            STARTED="$(docker inspect -f '{{.State.StartedAt}}' "$CID" 2>/dev/null)"
+            if [ "${RESTARTS:-0}" -gt 3 ] 2>/dev/null; then
+                bad "caddy 已经重启过 $RESTARTS 次，最近一次启动于 $STARTED"
+                suspect "caddy 在反复重启（$RESTARTS 次）。每次重启的那几秒 443 上没人监听，
+    买家刷到那几秒就打不开、再刷一下又好了。看 docker compose logs caddy 找崩溃原因。"
+            else
+                info "重启 ${RESTARTS:-0} 次，最近一次启动于 $STARTED"
+            fi
         else
             bad "caddy 容器状态是 $STATE"
             suspect "caddy 容器没正常跑起来（$STATE）。看 docker compose logs caddy，
@@ -142,14 +179,17 @@ head_ "3. 端口"
 
 tcp_probe() { timeout "$TIMEOUT" bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null; }
 
-if [ -n "$TARGET_IP" ]; then
-    if tcp_probe "$TARGET_IP" 443; then
-        ok "TCP 443 可连"
+DEAD_IPS=""      # 443 不通的地址，攒着最后一起说
+for IP in $ALL_IPS; do
+    if tcp_probe "$IP" 443; then
+        ok "$IP TCP 443 可连"
     else
-        bad "TCP 443 连不上"
-        suspect "443 根本没通。云控制台的防火墙放通 TCP 443（轻量云的防火墙在控制台，
-    机器里的 ufw 不作数），再确认 caddy 容器在跑。"
+        bad "$IP TCP 443 连不上"
+        DEAD_IPS="$DEAD_IPS $IP"
     fi
+done
+
+if [ -n "$TARGET_IP" ]; then
     if tcp_probe "$TARGET_IP" 80; then
         ok "TCP 80 可连"
     else
@@ -159,12 +199,75 @@ if [ -n "$TARGET_IP" ]; then
     fi
 fi
 
+if [ -n "$DEAD_IPS" ]; then
+    LIVE_COUNT="$(( $(echo "$ALL_IPS" | grep -c .) - $(echo "$DEAD_IPS" | wc -w) ))"
+    if [ "$LIVE_COUNT" -gt 0 ]; then
+        suspect "解析出的地址里，$DEAD_IPS 的 443 不通，另外 $LIVE_COUNT 个通。
+    浏览器每次随机挑一个，挑中好的就能开、挑中坏的就报错——这正是「刷新几次又能进」。
+    把 DNS 里多余/过期的那几条记录删掉，只留这台机器的地址。"
+    else
+        suspect "443 一个都没通。云控制台的防火墙放通 TCP 443（轻量云的防火墙在控制台，
+    机器里的 ufw 不作数），再确认 caddy 容器在跑。"
+    fi
+fi
+
 # ---------- 4. TLS 握手 ----------
 head_ "4. TLS 握手"
 
-if [ -n "$TARGET_IP" ] && command -v openssl >/dev/null; then
-    HS="$(echo | timeout "$TIMEOUT" openssl s_client -connect "$TARGET_IP:443" \
-          -servername "$DOMAIN" 2>&1)"
+# openssl 要求 IPv6 地址带方括号
+hs_once() {
+    local h="$1"
+    case "$h" in *:*) h="[$h]";; esac
+    echo | timeout "$TIMEOUT" openssl s_client -connect "${h}:443" -servername "$DOMAIN" 2>&1
+}
+
+# 每个地址打 REPEAT 次。时好时坏的毛病只握一次手是照不出来的。
+BEST_IP=""
+if [ -n "$ALL_IPS" ] && command -v openssl >/dev/null; then
+    for IP in $ALL_IPS; do
+        PASS=0
+        for _ in $(seq 1 "$REPEAT"); do
+            hs_once "$IP" | grep -q 'BEGIN CERTIFICATE' && PASS=$((PASS+1))
+        done
+        if [ "$PASS" = "$REPEAT" ]; then
+            ok "$IP 握手 $PASS/$REPEAT 成功"
+            [ -z "$BEST_IP" ] && BEST_IP="$IP"
+        elif [ "$PASS" = "0" ]; then
+            bad "$IP 握手 0/$REPEAT，全败"
+        else
+            bad "$IP 握手 $PASS/$REPEAT——时好时坏"
+            [ -z "$BEST_IP" ] && BEST_IP="$IP"
+            suspect "同一个地址 $IP 上，$REPEAT 次握手成了 $PASS 次。这种概率性失败
+    对应你说的「刷新几次又能进」，常见三种：
+    一是服务端 443 上不止一个进程在抢（宿主机自己的 Nginx/Caddy 和容器里的 Caddy 都开着），
+      服务器上 ss -lntp | grep :443 看是不是两个 PID；
+    二是未备案域名被概率性掐断（国内机器），备案下来即好；
+    三是机器负载高时握手超时，看 docker stats 和内存。"
+        fi
+    done
+    [ -z "$BEST_IP" ] && BEST_IP="$TARGET_IP"
+fi
+
+# v4 能通、v6 不通（或反过来）是 Safari 最典型的「有时候打不开」
+if [ -n "$IPS6" ] && [ -n "$IPS" ]; then
+    V4_OK=0; V6_OK=0
+    hs_once "$(echo "$IPS"  | head -n1)" | grep -q 'BEGIN CERTIFICATE' && V4_OK=1
+    hs_once "$(echo "$IPS6" | head -n1)" | grep -q 'BEGIN CERTIFICATE' && V6_OK=1
+    if [ "$V4_OK" = "1" ] && [ "$V6_OK" = "0" ]; then
+        bad "IPv4 握得上手，IPv6 握不上"
+        suspect "AAAA 记录指的地址上没有正常的 HTTPS。Safari 的 Happy Eyeballs 优先试 IPv6，
+    试不通才退回 IPv4，退回前那几秒就是「无法建立安全连接」，再刷新可能就走了 IPv4——
+    完全对得上「刷新几次又能进」。要么把 AAAA 记录删掉，要么让 IPv6 上也正常提供服务
+    （compose 的端口映射默认只绑 IPv4）。"
+    elif [ "$V6_OK" = "1" ] && [ "$V4_OK" = "0" ]; then
+        bad "IPv6 握得上手，IPv4 握不上"
+        suspect "A 记录指的地址上没有正常的 HTTPS，只有 IPv6 是好的。纯 IPv4 网络的买家
+    一直打不开，双栈的买家时好时坏。把 A 记录修对。"
+    fi
+fi
+
+if [ -n "$BEST_IP" ] && command -v openssl >/dev/null; then
+    HS="$(hs_once "$BEST_IP")"
 
     if echo "$HS" | grep -q 'BEGIN CERTIFICATE'; then
         CERT="$(echo "$HS" | sed -n '/BEGIN CERTIFICATE/,/END CERTIFICATE/p' | head -n 200)"
@@ -209,7 +312,8 @@ if [ -n "$TARGET_IP" ] && command -v openssl >/dev/null; then
         # Safari 会用 TLS 1.2/1.3，两个都探一下，能看出中间设备在捣乱
         for V in tls1_2:1.2 tls1_3:1.3; do
             FLAG="${V%%:*}"; LABEL="TLS ${V##*:}"
-            if echo | timeout "$TIMEOUT" openssl s_client -"$FLAG" -connect "$TARGET_IP:443" \
+            HOSTB="$BEST_IP"; case "$HOSTB" in *:*) HOSTB="[$HOSTB]";; esac
+            if echo | timeout "$TIMEOUT" openssl s_client -"$FLAG" -connect "${HOSTB}:443" \
                  -servername "$DOMAIN" >/dev/null 2>&1; then
                 ok "$LABEL 握手正常"
             else
@@ -254,24 +358,41 @@ explain_curl() {
 }
 
 FETCH_FAILED=0
+# 每条路径也打 REPEAT 次：买家说的「刷新几次又能进」就是这里的成功率不到 100%
 for P in /r /t /api/public/specs; do
-    R="$(curl_code "https://$DOMAIN$P")"
-    CODE="${R%%|*}"; ERR="${R##*|}"
-    if [ "$ERR" != "0" ]; then
-        bad "https://$DOMAIN$P → $(explain_curl "$ERR")"
+    PASS=0; LAST_ERR=0; LAST_CODE=""
+    for _ in $(seq 1 "$REPEAT"); do
+        R="$(curl_code "https://$DOMAIN$P")"
+        CODE="${R%%|*}"; ERR="${R##*|}"
+        if [ "$ERR" = "0" ] && [ "$CODE" = "200" ]; then
+            PASS=$((PASS+1))
+        else
+            LAST_ERR="$ERR"; LAST_CODE="$CODE"
+        fi
+    done
+
+    if [ "$PASS" = "$REPEAT" ]; then
+        ok "https://$DOMAIN$P → $PASS/$REPEAT 次 200"
+    elif [ "$LAST_ERR" != "0" ]; then
+        bad "https://$DOMAIN$P → $PASS/$REPEAT 次成功，失败时：$(explain_curl "$LAST_ERR")"
         # 前面几节可能都过了，但真去取页面时才炸——这条必须自己算一处可疑，
-        # 否则汇总会误报「没发现问题」。三个路径一起挂是同一个毛病，只记一次。
+        # 否则汇总会误报「没发现问题」。三条路径一起挂是同一个毛病，只记一次。
         if [ "$FETCH_FAILED" = "0" ]; then
             FETCH_FAILED=1
-            suspect "取 https://$DOMAIN 上的页面失败：$(explain_curl "$ERR")。
+            if [ "$PASS" = "0" ]; then
+                suspect "取 https://$DOMAIN 上的页面每次都失败：$(explain_curl "$LAST_ERR")。
     这就是买家在 Safari 里看到的那一幕，按上面 TLS / 端口两节的结论先修；
     若那两节都正常，那么问题出在公网到这台机器的路上：防火墙、备案、或中间的 CDN。"
+            else
+                suspect "取 https://$DOMAIN 上的页面 $REPEAT 次里成了 $PASS 次，失败时报
+    $(explain_curl "$LAST_ERR")——和「刷新几次又能进去」完全对上。看上面第 1、3、4 节：
+    多条 A/AAAA 记录里有坏的、caddy 在反复重启、或 443 上有两个进程在抢，都会这样。
+    以上都正常的话，是公网这一段在概率性丢包/重置，国内机器优先怀疑未备案。"
+            fi
         fi
-    elif [ "$CODE" = "200" ]; then
-        ok "https://$DOMAIN$P → 200"
     else
-        warn "https://$DOMAIN$P → HTTP $CODE"
-        [ "$CODE" = "404" ] && suspect "$P 返回 404：Caddyfile 里的 handle 规则或静态目录挂载不对。
+        warn "https://$DOMAIN$P → $PASS/$REPEAT 次成功，失败时 HTTP $LAST_CODE"
+        [ "$LAST_CODE" = "404" ] && suspect "$P 返回 404：Caddyfile 里的 handle 规则或静态目录挂载不对。
     容器化 Caddy 要求 web/track、web/register 挂进 /srv 下，见 deploy/DOCKER.md 第 5 节。"
     fi
 done
