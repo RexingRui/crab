@@ -174,6 +174,29 @@ else
     info "不在服务器上（或 docker 不可用），跳过容器检查"
 fi
 
+# 宿主机自己的 Nginx/Caddy 和容器化 Caddy 同时开着，是「时好时坏」的经典原因：
+# 两个进程抢同一个 443，谁先绑上谁应答，另一个可能连证书都没有。
+if command -v ss >/dev/null 2>&1; then
+    L443="$(ss -lntp 2>/dev/null | awk '$4 ~ /:443$/')"
+    if [ -n "$L443" ]; then
+        PROCS="$(echo "$L443" | grep -o '"[^"]*"' | tr -d '"' | sort -u | tr '\n' ' ')"
+        if [ -n "$PROCS" ]; then
+            info "443 上监听的进程：$PROCS"
+            # docker-proxy 是 compose 的端口映射，正常；再冒出 nginx/apache 就是抢端口了
+            if echo "$PROCS" | grep -qiE 'nginx|apache|httpd|haproxy'; then
+                bad "除了容器的端口映射，宿主机上还有别的反代在 443 上"
+                suspect "443 上同时有容器化 Caddy 和宿主机的反代（$PROCS）。
+    两个进程抢同一个端口，谁绑上谁应答；宿主机那个多半没有这个域名的证书，
+    于是有时候能开、有时候报「无法建立安全连接」——正是「刷新几次又能进」。
+    二选一：停掉宿主机的反代（systemctl stop nginx && systemctl disable nginx），
+    或者别用容器化 Caddy（去掉 --profile proxy），按 DOCKER.md 第 5 节方案 B 配宿主机那套。"
+            fi
+        fi
+    else
+        warn "443 上没有监听的进程"
+    fi
+fi
+
 # ---------- 3. 端口连通 ----------
 head_ "3. 端口"
 
@@ -396,6 +419,20 @@ for P in /r /t /api/public/specs; do
     容器化 Caddy 要求 web/track、web/register 挂进 /srv 下，见 deploy/DOCKER.md 第 5 节。"
     fi
 done
+
+# Caddy 会回 Server: Caddy。回的是别的东西，说明请求压根没到我们这套里来
+SRV="$(curl -sSI --max-time "$TIMEOUT" "https://$DOMAIN/r" 2>/dev/null \
+       | grep -i '^server:' | tr -d '\r' | cut -d' ' -f2-)"
+if [ -n "$SRV" ]; then
+    if echo "$SRV" | grep -qi 'caddy'; then
+        ok "应答的是 Caddy（Server: $SRV）"
+    else
+        bad "应答的不是 Caddy，是 $SRV"
+        suspect "回应请求的不是这套容器里的 Caddy，而是 $SRV——中间还隔着一层
+    （宿主机的 Nginx、云厂商的 CDN / 负载均衡、或者你这边的网络代理）。
+    证书就归那一层管，Caddy 这边配得再对也不生效。先确定那层是谁，再决定证书配在哪。"
+    fi
+fi
 
 # Alt-Svc 里有 h3 就说明在向浏览器兜售 QUIC；UDP 443 没放通时 Safari 容易卡在这儿
 ALTSVC="$(curl -sSI --max-time "$TIMEOUT" "https://$DOMAIN/r" 2>/dev/null | grep -i '^alt-svc:')"
