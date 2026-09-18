@@ -155,7 +155,16 @@ if [ -f docker-compose.yml ] && command -v docker >/dev/null && docker info >/de
         # 只看 warn/error 级别。Caddy 的 info 里有不少带 failed 字样却无害的话
         # （最典型的是 quic-go 那条 UDP 缓冲区提示），按关键字抓会一路误报成「证书失败」。
         CADDY_LOG="$(docker compose logs --tail 800 caddy 2>/dev/null)"
-        REAL_ERR="$(echo "$CADDY_LOG" | grep -E '"level":"(error|warn)"' | tail -n 8)"
+        # 有几条 warn 是 Caddy 的日常噪音，不是故障，滤掉免得淹没真问题：
+        #   - "skipped because it requires TLS"：:80 上只做 HTTP→HTTPS 跳转，
+        #     h2/h3 用不上本来就会跳过，和买家页无关
+        #   - "Caddyfile input is not formatted"：格式提示，跑 caddy fmt 即可
+        BENIGN='skipped because it requires TLS|input is not formatted'
+        REAL_ERR="$(echo "$CADDY_LOG" | grep -E '"level":"(error|warn)"' \
+                    | grep -vE "$BENIGN" | tail -n 8)"
+        NOISE="$(echo "$CADDY_LOG" | grep -E '"level":"(error|warn)"' \
+                 | grep -cE "$BENIGN")"
+        [ "${NOISE:-0}" -gt 0 ] && info "另有 $NOISE 条无害的 warn（:80 跳过 h2/h3、格式提示），已忽略"
         if [ -n "$REAL_ERR" ]; then
             bad "caddy 日志里有 warn/error（最近 8 条）："
             echo "$REAL_ERR" | sed 's/^/      /'
