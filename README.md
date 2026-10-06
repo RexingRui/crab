@@ -285,7 +285,7 @@ curl -X POST localhost:8080/api/orders/freight-settle -H "Authorization: Bearer 
 ```
 
 **补贴规则写在代码里**（`internal/model/freight.go`），按只数分档，每档是「卖家最多补多少」，
-建议值 = max(0, 口径金额 − 该档卖家补贴)。当前 `v1`：8 只以内补 20 元，16 只以内补 40 元，再多补 60 元。
+建议值 = max(0, 口径金额 − 该档卖家补贴)。当前 `v1`（按一笔订单的总只数）：15 只以内补 20 元，16–23 只补 40 元，24 只及以上补 60 元。
 规则带版本号，订单建单时记下当时的版本（`freight_rule_ver`），之后一直按这一版算。
 **改规则只影响之后新建的订单**：在 `freightRules` 里加一版新的（别改老版本），再把 `currentFreightRuleVer` 指过去。
 详情里的 `freight_seller_cap` 是按这单只数和规则版本算出的卖家补贴上限，前端用它现算建议值。

@@ -45,9 +45,10 @@ var freightRules = map[string]FreightRule{
 	"v1": {
 		Version:      "v1",
 		DefaultBasis: FreightBasisActual,
+		// 一笔订单的总只数：15 只以内补 20，16-23 只补 40，24 只及以上补 60
 		Tiers: []FreightTier{
-			{MaxCrabs: 8, SellerCap: 2000},
-			{MaxCrabs: 16, SellerCap: 4000},
+			{MaxCrabs: 15, SellerCap: 2000},
+			{MaxCrabs: 23, SellerCap: 4000},
 			{MaxCrabs: 0, SellerCap: 6000},
 		},
 	},

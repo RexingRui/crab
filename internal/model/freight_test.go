@@ -37,7 +37,7 @@ func TestFreightRulesWellFormed(t *testing.T) {
 }
 
 func TestFreightSuggest(t *testing.T) {
-	r := FreightRule{Tiers: []FreightTier{{8, 2000}, {16, 4000}, {0, 6000}}}
+	r := FreightRule{Tiers: []FreightTier{{15, 2000}, {23, 4000}, {0, 6000}}}
 	cases := []struct {
 		crabs int
 		cost  int64
@@ -46,13 +46,27 @@ func TestFreightSuggest(t *testing.T) {
 		{8, 1800, 0},     // 没超过 20，卖家全包
 		{8, 2600, 600},   // 超出 6 元买家补
 		{16, 6000, 2000}, // 16 只运费 60：卖家补 40，买家补 20
-		{9, 4500, 500},   // 9 只落在第二档
+		{20, 4500, 500},  // 20 只落在第二档
 		{40, 9000, 3000}, // 超过最后一个上限，按最后一档
 		{0, 2500, 500},   // 全是按斤的，只数为 0，按第一档
 	}
 	for _, c := range cases {
 		if got := r.SuggestBuyerFee(c.cost, c.crabs); got != c.want {
 			t.Errorf("%d 只、运费 %d：买家补 %d，期望 %d", c.crabs, c.cost, got, c.want)
+		}
+	}
+}
+
+// TestFreightRuleV1Tiers v1 的分档边界：15 只以内补 20，16-23 只补 40，24 只及以上补 60。
+func TestFreightRuleV1Tiers(t *testing.T) {
+	r := FreightRuleOf("v1")
+	for crabs, want := range map[int]int64{
+		1: 2000, 8: 2000, 15: 2000,
+		16: 4000, 17: 4000, 23: 4000,
+		24: 6000, 40: 6000,
+	} {
+		if got := r.SellerCap(crabs); got != want {
+			t.Errorf("%d 只：卖家最多补 %d，期望 %d", crabs, got, want)
 		}
 	}
 }
