@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -178,6 +179,31 @@ func TestRegistrationSameLinkIsIdempotent(t *testing.T) {
 	// 链接可能被转发，幂等回执里的姓名要打码：拿到转发链接的人不该看到第一位买家的全名。
 	if two.ReceiverName == one.ReceiverName || !strings.Contains(two.ReceiverName, "*") {
 		t.Fatalf("幂等回执没给姓名打码: %q", two.ReceiverName)
+	}
+}
+
+// TestRegistrationAfterSellerDeleted 卖家删了这条链接登记的单，再提交要给明确提示，不能 500。
+func TestRegistrationAfterSellerDeleted(t *testing.T) {
+	e := newTestEnv(t)
+
+	token := e.regLink(t, "")
+	sp := e.publicSpecIDs(t)[0]
+	body := registerBody(token, sp.ID, sp.PackSize, "13900139020")
+
+	_, _, data := e.register(t, body)
+	var reg RegistrationDTO
+	if err := json.Unmarshal(data, &reg); err != nil {
+		t.Fatalf("解析回执失败: %v", err)
+	}
+	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
+	e.mustOK(t, http.MethodDelete, "/api/orders/"+strconv.FormatInt(o.ID, 10), nil)
+
+	status, resp, _ := e.register(t, body)
+	if resp.Code != errs.CodeStateConflict {
+		t.Fatalf("删单后再提交应提示已撤销: status=%d code=%d msg=%s", status, resp.Code, resp.Msg)
+	}
+	if !strings.Contains(resp.Msg, "撤销") {
+		t.Fatalf("提示语不对: %s", resp.Msg)
 	}
 }
 

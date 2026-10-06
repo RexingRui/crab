@@ -321,6 +321,19 @@ func (q *queries) GetOrderByRequestID(ctx context.Context, requestID string) (*m
 	return q.getOrderBy(ctx, "request_id=?", requestID)
 }
 
+func (q *queries) RequestIDDeleted(ctx context.Context, requestID string) (bool, error) {
+	if requestID == "" {
+		return false, nil
+	}
+	var n int
+	err := q.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM orders WHERE request_id=? AND deleted_at IS NOT NULL`, requestID).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("request id deleted: %w", err)
+	}
+	return n > 0, nil
+}
+
 func (q *queries) CountOrdersByPhoneSince(ctx context.Context, phone string, since int64) (int, error) {
 	var n int
 	err := q.db.QueryRowContext(ctx,

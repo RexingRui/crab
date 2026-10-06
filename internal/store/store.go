@@ -20,6 +20,9 @@ type Queries interface {
 	GetOrderByID(ctx context.Context, id int64) (*model.Order, error)
 	GetOrderByNo(ctx context.Context, orderNo string) (*model.Order, error)
 	GetOrderByRequestID(ctx context.Context, requestID string) (*model.Order, error)
+	// RequestIDDeleted 这个幂等键是否属于一笔已软删除的订单。唯一索引不看 deleted_at，
+	// 所以这种键再也建不了单，调用方要据此给出提示，而不是去撞索引。
+	RequestIDDeleted(ctx context.Context, requestID string) (bool, error)
 	// ListOrders 返回一页订单与符合条件的总数。f.PageSize <= 0 表示不分页（导出用）。
 	ListOrders(ctx context.Context, f model.OrderFilter) ([]*model.Order, int, error)
 	// CountOrdersByPhoneSince 统计某手机号在 since 之后（含）创建的未删除订单数，

@@ -18,6 +18,9 @@ var phoneRe = regexp.MustCompile(`^1[3-9]\d{9}$`)
 // errDuplicateRequest 是建单时 request_id 撞唯一索引的内部信号，不会返回给客户端。
 var errDuplicateRequest = errors.New("duplicate request_id")
 
+// errDeletedRequest 这个 request_id 的订单已被删除，同一个键不能再建单。
+var errDeletedRequest = errs.New(errs.CodeIdempotent, "这笔订单已经删除了，刷新后重新录一笔")
+
 // OrderService 承载订单的全部业务逻辑：金额计算、状态流转、幂等、收款重算。
 type OrderService struct {
 	st  store.Store
@@ -209,6 +212,11 @@ func (s *OrderService) CreateOrder(ctx context.Context, in CreateOrderInput) (*m
 		} else if !errors.Is(err, errs.ErrNotFound) {
 			return nil, false, errs.Internal(err)
 		}
+		if deleted, err := s.st.RequestIDDeleted(ctx, in.RequestID); err != nil {
+			return nil, false, errs.Internal(err)
+		} else if deleted {
+			return nil, false, errDeletedRequest
+		}
 	}
 
 	now := s.now()
@@ -261,6 +269,9 @@ func (s *OrderService) CreateOrder(ctx context.Context, in CreateOrderInput) (*m
 	// 并发下同一 request_id 同时进来，落败的那一方回查并返回赢家的订单。
 	if errors.Is(err, errDuplicateRequest) {
 		existing, err := s.st.GetOrderByRequestID(ctx, in.RequestID)
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil, false, errDeletedRequest
+		}
 		if err != nil {
 			return nil, false, errs.Internal(err)
 		}
