@@ -98,7 +98,6 @@ func (a *API) Handler() http.Handler {
 
 	// 收款
 	mux.HandleFunc("POST /api/orders/{id}/payments", a.AddPayment)
-	mux.HandleFunc("DELETE /api/payments/{id}", a.DeletePayment)
 
 	// 统计
 	mux.HandleFunc("GET /api/stats/dashboard", a.Dashboard)

@@ -36,13 +36,6 @@ type Queries interface {
 	ListItemsByOrder(ctx context.Context, orderID int64) ([]model.OrderItem, error)
 	ListItemsByOrders(ctx context.Context, orderIDs []int64) (map[int64][]model.OrderItem, error)
 
-	// ---------- 收款 ----------
-	InsertPayment(ctx context.Context, p *model.Payment) error
-	GetPaymentByID(ctx context.Context, id int64) (*model.Payment, error)
-	ListPaymentsByOrder(ctx context.Context, orderID int64) ([]model.Payment, error)
-	SumPayments(ctx context.Context, orderID int64) (int64, error)
-	SoftDeletePayment(ctx context.Context, id, now int64) error
-
 	// ---------- 操作流水 ----------
 	InsertLog(ctx context.Context, l *model.OrderLog) error
 	ListLogsByOrder(ctx context.Context, orderID int64) ([]model.OrderLog, error)
@@ -64,6 +57,7 @@ type Queries interface {
 	// ---------- 统计 ----------
 	CountOrdersCreatedBetween(ctx context.Context, start, end int64) (int, error)
 	CountOrdersShippedBetween(ctx context.Context, start, end int64) (int, error)
+	// SumPaymentsBetween 区间内记下的收款减退款，取自操作流水。
 	SumPaymentsBetween(ctx context.Context, start, end int64) (int64, error)
 	CountOrdersByShipStatus(ctx context.Context, status model.ShipStatus) (int, error)
 	CountPendingByExpectDate(ctx context.Context, date string) (int, error)

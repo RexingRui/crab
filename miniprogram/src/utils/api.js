@@ -30,7 +30,6 @@ export const api = {
 
   // 收款
   addPayment: (id, body) => post(`/api/orders/${id}/payments`, body),
-  removePayment: (paymentId) => del(`/api/payments/${paymentId}`),
 
   // 规格价目表：录单页只要启用中的，设置页要连停用的一起看
   specs: () => get('/api/specs'),

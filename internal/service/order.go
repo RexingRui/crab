@@ -21,7 +21,7 @@ var errDuplicateRequest = errors.New("duplicate request_id")
 // errDeletedRequest 这个 request_id 的订单已被删除，同一个键不能再建单。
 var errDeletedRequest = errs.New(errs.CodeIdempotent, "这笔订单已经删除了，刷新后重新录一笔")
 
-// OrderService 承载订单的全部业务逻辑：金额计算、状态流转、幂等、收款重算。
+// OrderService 承载订单的全部业务逻辑：金额计算、状态流转、幂等、收款。
 type OrderService struct {
 	st  store.Store
 	now func() int64
@@ -348,19 +348,13 @@ func (s *OrderService) CreateOrder(ctx context.Context, in CreateOrderInput) (*m
 
 // ========== 查询 ==========
 
-// loadDetail 装载订单的明细、收款流水与操作流水。
+// loadDetail 装载订单的明细与操作流水（收款记录也在流水里）。
 func (s *OrderService) loadDetail(ctx context.Context, q store.Queries, o *model.Order) error {
 	items, err := q.ListItemsByOrder(ctx, o.ID)
 	if err != nil {
 		return errs.Internal(err)
 	}
 	o.Items = items
-
-	payments, err := q.ListPaymentsByOrder(ctx, o.ID)
-	if err != nil {
-		return errs.Internal(err)
-	}
-	o.Payments = payments
 
 	logs, err := q.ListLogsByOrder(ctx, o.ID)
 	if err != nil {
@@ -480,9 +474,7 @@ func (s *OrderService) UpdateOrder(ctx context.Context, in UpdateOrderInput) (*m
 		}
 
 		// 应收变了，实收没变，收款状态可能从 paid 退回 partial，必须重算。
-		if err := recalcPayment(ctx, q, o, now, now); err != nil {
-			return err
-		}
+		applyPayStatus(o, now, now)
 
 		if err := q.UpdateOrder(ctx, o, in.ExpectedUpdatedAt); err != nil {
 			if errors.Is(err, store.ErrVersionConflict) {
@@ -751,12 +743,14 @@ type AddPaymentInput struct {
 	OrderID   int64
 	Amount    int64
 	PayMethod model.PayMethod
-	PaidAt    *int64
-	Remark    string
-	Operator  string
+	// PaidAt 实际收到钱的时间，不传就是现在。补记昨天收的钱时用得上。
+	PaidAt   *int64
+	Remark   string
+	Operator string
 }
 
-// AddPayment 记一笔收款（金额为负表示退款），并在同一事务内重算订单的实收与收款状态。
+// AddPayment 记一笔收款（金额为负表示退款）：直接加减订单的实收，并写一条带金额的操作流水。
+// 不再单独存收款流水表——一单最多收两三次钱，流水里的记录足够追溯；记错了就再记一笔反向的冲掉。
 func (s *OrderService) AddPayment(ctx context.Context, in AddPaymentInput) (*model.Order, error) {
 	if in.Amount == 0 {
 		return nil, errs.InvalidParam("amount 不能为 0")
@@ -781,22 +775,10 @@ func (s *OrderService) AddPayment(ctx context.Context, in AddPaymentInput) (*mod
 		if err != nil {
 			return mapNotFound(err, "订单")
 		}
-		p := &model.Payment{
-			OrderID:   o.ID,
-			Amount:    in.Amount,
-			PayMethod: method,
-			PaidAt:    paidAt,
-			Remark:    in.Remark,
-			CreatedAt: now,
-		}
-		if err := q.InsertPayment(ctx, p); err != nil {
-			return errs.Internal(err)
-		}
 
 		fromStatus := o.PayStatus
-		if err := recalcPayment(ctx, q, o, paidAt, now); err != nil {
-			return err
-		}
+		o.PaidAmount += in.Amount
+		applyPayStatus(o, paidAt, now)
 		if err := q.UpdateOrder(ctx, o, 0); err != nil {
 			return errs.Internal(err)
 		}
@@ -813,7 +795,9 @@ func (s *OrderService) AddPayment(ctx context.Context, in AddPaymentInput) (*mod
 			ToValue:   string(o.PayStatus),
 			Operator:  in.Operator,
 			Remark:    in.Remark,
-			CreatedAt: now,
+			Amount:    in.Amount,
+			PayMethod: method,
+			CreatedAt: paidAt,
 		}); err != nil {
 			return errs.Internal(err)
 		}
@@ -829,68 +813,11 @@ func (s *OrderService) AddPayment(ctx context.Context, in AddPaymentInput) (*mod
 	return result, nil
 }
 
-// DeletePayment 删除记错的收款流水（软删除），同样走「重算实收 → 重算状态」的链路。
-func (s *OrderService) DeletePayment(ctx context.Context, paymentID int64, operator string) (*model.Order, error) {
-	now := s.now()
-
-	var result *model.Order
-	err := s.st.WithTx(ctx, func(q store.Queries) error {
-		p, err := q.GetPaymentByID(ctx, paymentID)
-		if err != nil {
-			return mapNotFound(err, "收款记录")
-		}
-		o, err := q.GetOrderByID(ctx, p.OrderID)
-		if err != nil {
-			return mapNotFound(err, "订单")
-		}
-		if err := q.SoftDeletePayment(ctx, paymentID, now); err != nil {
-			return errs.Internal(err)
-		}
-
-		fromStatus := o.PayStatus
-		if err := recalcPayment(ctx, q, o, now, now); err != nil {
-			return err
-		}
-		if err := q.UpdateOrder(ctx, o, 0); err != nil {
-			return errs.Internal(err)
-		}
-		if err := q.InsertLog(ctx, &model.OrderLog{
-			OrderID:   o.ID,
-			Action:    model.ActionDelete,
-			Field:     "pay_status",
-			FromValue: string(fromStatus),
-			ToValue:   string(o.PayStatus),
-			Operator:  operator,
-			Remark: "删除收款记录 #" + strconv.FormatInt(paymentID, 10) +
-				"，金额 " + model.FormatYuan(p.Amount) + " 元",
-			CreatedAt: now,
-		}); err != nil {
-			return errs.Internal(err)
-		}
-		result = o
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.loadDetail(ctx, s.st, result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-// recalcPayment 重算订单的实收金额与收款状态。
-//
-// paid_amount 与 pay_status 都是派生值，只能由这里写入：
-// 实收 = 该订单未删除收款流水之和；状态由实收与应收的大小关系推导。
+// applyPayStatus 按实收与应收重新推导收款状态，以及首次收款 / 付清的时间戳。
+// 实收或应收任一变了都要调它：改单改了金额、记了收款、退了款。
 // eventTime 用于首次收款 / 付清的时间戳（取触发这次重算的收款时间）。
-func recalcPayment(ctx context.Context, q store.Queries, o *model.Order, eventTime, now int64) error {
-	paid, err := q.SumPayments(ctx, o.ID)
-	if err != nil {
-		return errs.Internal(err)
-	}
-	o.PaidAmount = paid
-	o.PayStatus = model.CalcPayStatus(paid, o.PayableAmount)
+func applyPayStatus(o *model.Order, eventTime, now int64) {
+	o.PayStatus = model.CalcPayStatus(o.PaidAmount, o.PayableAmount)
 
 	switch o.PayStatus {
 	case model.PayUnpaid:
@@ -913,7 +840,6 @@ func recalcPayment(ctx context.Context, q store.Queries, o *model.Order, eventTi
 	}
 
 	o.UpdatedAt = now
-	return nil
 }
 
 // ========== 买家免登录查单 ==========

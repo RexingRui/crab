@@ -15,7 +15,7 @@ type addPaymentReq struct {
 }
 
 // AddPayment POST /api/orders/{id}/payments
-// 记一笔收款，金额为负表示退款。实收与收款状态在同一事务内重算。
+// 记一笔收款，金额为负表示退款。记错了不删，再记一笔反向的冲掉。
 func (a *API) AddPayment(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
 	if err != nil {
@@ -36,22 +36,6 @@ func (a *API) AddPayment(w http.ResponseWriter, r *http.Request) {
 		Remark:    req.Remark,
 		Operator:  OpenIDFrom(r.Context()),
 	})
-	if err != nil {
-		Fail(w, r, err)
-		return
-	}
-	OK(w, ToOrderDTO(o))
-}
-
-// DeletePayment DELETE /api/payments/{id}
-// 收款记错了就删掉，软删除后同样重算实收与收款状态。
-func (a *API) DeletePayment(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		Fail(w, r, err)
-		return
-	}
-	o, err := a.orders.DeletePayment(r.Context(), id, OpenIDFrom(r.Context()))
 	if err != nil {
 		Fail(w, r, err)
 		return

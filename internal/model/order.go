@@ -42,9 +42,8 @@ type Order struct {
 	DeletedAt *int64
 
 	// 关联数据，按需加载
-	Items    []OrderItem
-	Payments []Payment
-	Logs     []OrderLog
+	Items []OrderItem
+	Logs  []OrderLog
 }
 
 // UnpaidAmount 未收金额，可为负数（超付）。
@@ -86,19 +85,8 @@ type OrderItem struct {
 	SortNo    int
 }
 
-// Payment 收款流水。Amount 为负数表示退款。
-type Payment struct {
-	ID        int64
-	OrderID   int64
-	Amount    int64
-	PayMethod PayMethod
-	PaidAt    int64
-	Remark    string
-	CreatedAt int64
-	DeletedAt *int64
-}
-
-// OrderLog 操作流水。
+// OrderLog 操作流水。收款与退款也记在这里：Amount 是这一笔的金额（退款为负），
+// 订单上的 paid_amount 就是这些金额累加出来的。
 type OrderLog struct {
 	ID        int64
 	OrderID   int64
@@ -108,7 +96,14 @@ type OrderLog struct {
 	ToValue   string
 	Operator  string
 	Remark    string
+	Amount    int64
+	PayMethod PayMethod
 	CreatedAt int64
+}
+
+// IsPayment 这条流水是不是一笔收款或退款。
+func (l OrderLog) IsPayment() bool {
+	return (l.Action == ActionPay || l.Action == ActionRefund) && l.Amount != 0
 }
 
 // Spec 价目表的一档。按只卖就是一只的价，按套餐卖就是一盒的价。

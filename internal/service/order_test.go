@@ -192,14 +192,13 @@ func TestPaymentPartialToPaidAndBack(t *testing.T) {
 		t.Error("付清应写入 settled_time")
 	}
 
-	// 删掉尾款这笔（记错了）
-	lastPayment := o.Payments[len(o.Payments)-1]
-	o, err = svc.DeletePayment(ctx, lastPayment.ID, "oTest")
+	// 尾款记错了：再记一笔反向的冲掉
+	o, err = svc.AddPayment(ctx, AddPaymentInput{OrderID: o.ID, Amount: -39000, Remark: "尾款记错了"})
 	if err != nil {
-		t.Fatalf("删除收款失败: %v", err)
+		t.Fatalf("冲正失败: %v", err)
 	}
 	if o.PayStatus != model.PayPartial || o.PaidAmount != 40000 {
-		t.Errorf("删除尾款后应退回 partial，实际 %s paid=%d", o.PayStatus, o.PaidAmount)
+		t.Errorf("冲正后应退回 partial，实际 %s paid=%d", o.PayStatus, o.PaidAmount)
 	}
 	if o.SettledTime != nil {
 		t.Error("退回 partial 后 settled_time 应清空")
@@ -207,8 +206,14 @@ func TestPaymentPartialToPaidAndBack(t *testing.T) {
 	if o.FirstPayTime == nil {
 		t.Error("还留着定金，first_pay_time 不应清空")
 	}
-	if len(o.Payments) != 1 {
-		t.Errorf("软删后应只剩 1 条流水，实际 %d", len(o.Payments))
+	var amounts []int64
+	for _, l := range o.Logs {
+		if l.IsPayment() {
+			amounts = append(amounts, l.Amount)
+		}
+	}
+	if len(amounts) != 3 || amounts[0] != 40000 || amounts[1] != 39000 || amounts[2] != -39000 {
+		t.Errorf("流水里的收款记录不对: %v", amounts)
 	}
 }
 

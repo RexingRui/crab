@@ -26,6 +26,8 @@ var addedColumns = []struct{ table, column, ddl, backfill string }{
 				WHERE s.gender = order_items.gender AND s.spec_gram = order_items.spec_gram
 				  AND s.unit = 'box'), 0)
 			ELSE 0 END`},
+	{"order_logs", "amount", "ALTER TABLE order_logs ADD COLUMN amount INTEGER NOT NULL DEFAULT 0", ""},
+	{"order_logs", "pay_method", "ALTER TABLE order_logs ADD COLUMN pay_method TEXT NOT NULL DEFAULT ''", ""},
 }
 
 // Migrate 建表（全部语句都是 IF NOT EXISTS，可重复执行），再补增量列。
@@ -50,7 +52,38 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 			}
 		}
 	}
-	return nil
+	return s.migrateLegacyPayments(ctx)
+}
+
+// migrateLegacyPayments 收款流水表已经并进操作流水。老库里还在的 payments 表：
+// 把没删的每一笔抄进 order_logs（金额、方式、备注、收款时间），再改名成 payments_legacy 留底。
+// 改名之后这一步就不会再跑，可重复执行。
+func (s *SQLiteStore) migrateLegacyPayments(ctx context.Context) error {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='payments'`).Scan(&n); err != nil {
+		return fmt.Errorf("check payments table: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO order_logs(order_id, action, field, from_value, to_value, operator, remark,
+				amount, pay_method, created_at)
+			 SELECT order_id, CASE WHEN amount < 0 THEN 'refund' ELSE 'pay' END, 'paid_amount', '', '',
+				'', remark, amount, pay_method, paid_at
+			 FROM payments WHERE deleted_at IS NULL`); err != nil {
+		return fmt.Errorf("copy payments to logs: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE payments RENAME TO payments_legacy`); err != nil {
+		return fmt.Errorf("rename payments: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) hasColumn(ctx context.Context, table, column string) (bool, error) {

@@ -127,6 +127,71 @@ func TestMigrateBackfillsCrabCount(t *testing.T) {
 	}
 }
 
+// TestMigrateMovesPaymentsIntoLogs 老库的收款流水抄进操作流水，删掉的不抄，原表改名留底。
+func TestMigrateMovesPaymentsIntoLogs(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "old.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+
+	for _, q := range []string{
+		oldOrdersDDL,
+		`CREATE TABLE payments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, amount INTEGER NOT NULL,
+			pay_method TEXT NOT NULL DEFAULT 'wechat', paid_at INTEGER NOT NULL,
+			remark TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, deleted_at INTEGER)`,
+		`CREATE TABLE order_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, action TEXT NOT NULL,
+			field TEXT NOT NULL DEFAULT '', from_value TEXT NOT NULL DEFAULT '', to_value TEXT NOT NULL DEFAULT '',
+			operator TEXT NOT NULL DEFAULT '', remark TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)`,
+		`INSERT INTO orders(order_no, receiver_name, phone, address, paid_amount, created_at, updated_at)
+		 VALUES('20260101-001','张三','13800138000','苏州市工业园区xx路 1 号',30000,1,1)`,
+		`INSERT INTO payments(order_id, amount, pay_method, paid_at, remark, created_at, deleted_at) VALUES
+		 (1, 40000, 'wechat', 100, '定金', 100, NULL),
+		 (1, 99900, 'cash',   150, '记错了', 150, 160),
+		 (1, -10000, 'wechat', 200, '死了一只', 200, NULL)`,
+	} {
+		if _, err := st.DB().ExecContext(ctx, q); err != nil {
+			t.Fatalf("准备老库失败: %v\n%s", err, q)
+		}
+	}
+
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate 第二次: %v", err)
+	}
+
+	logs, err := st.ListLogsByOrder(ctx, 1)
+	if err != nil {
+		t.Fatalf("list logs: %v", err)
+	}
+	var got []model.OrderLog
+	for _, l := range logs {
+		if l.IsPayment() {
+			got = append(got, l)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("应抄过来 2 笔（删掉的不抄、跑两次不重复），实际 %+v", got)
+	}
+	if got[0].Amount != 40000 || got[0].Remark != "定金" || got[0].CreatedAt != 100 {
+		t.Errorf("定金抄错了: %+v", got[0])
+	}
+	if got[1].Amount != -10000 || got[1].Action != model.ActionRefund || got[1].PayMethod != model.PayMethodWechat {
+		t.Errorf("退款抄错了: %+v", got[1])
+	}
+
+	var n int
+	if err := st.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='payments_legacy'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("原表应改名为 payments_legacy 留底: n=%d err=%v", n, err)
+	}
+}
+
 // TestMigrateFreshDBHasSource 新库直接由 schema.sql 建出来，也得有这一列。
 func TestMigrateFreshDBHasSource(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "fresh.db"))

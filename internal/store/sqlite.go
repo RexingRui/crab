@@ -549,102 +549,15 @@ func (q *queries) ListItemsByOrders(ctx context.Context, orderIDs []int64) (map[
 	return out, nil
 }
 
-// ---------- 收款流水 ----------
-
-const paymentColumns = `id, order_id, amount, pay_method, paid_at, remark, created_at, deleted_at`
-
-func scanPayment(sc rowScanner) (*model.Payment, error) {
-	var p model.Payment
-	var deleted sql.NullInt64
-	if err := sc.Scan(&p.ID, &p.OrderID, &p.Amount, &p.PayMethod, &p.PaidAt,
-		&p.Remark, &p.CreatedAt, &deleted); err != nil {
-		return nil, err
-	}
-	p.DeletedAt = toPtr(deleted)
-	return &p, nil
-}
-
-func (q *queries) InsertPayment(ctx context.Context, p *model.Payment) error {
-	res, err := q.db.ExecContext(ctx,
-		`INSERT INTO payments(order_id, amount, pay_method, paid_at, remark, created_at, deleted_at)
-		 VALUES(?,?,?,?,?,?,?)`,
-		p.OrderID, p.Amount, string(p.PayMethod), p.PaidAt, p.Remark, p.CreatedAt, nullInt(p.DeletedAt))
-	if err != nil {
-		return fmt.Errorf("insert payment: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("insert payment last id: %w", err)
-	}
-	p.ID = id
-	return nil
-}
-
-func (q *queries) GetPaymentByID(ctx context.Context, id int64) (*model.Payment, error) {
-	row := q.db.QueryRowContext(ctx,
-		`SELECT `+paymentColumns+` FROM payments WHERE id=? AND deleted_at IS NULL`, id)
-	p, err := scanPayment(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errs.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get payment: %w", err)
-	}
-	return p, nil
-}
-
-func (q *queries) ListPaymentsByOrder(ctx context.Context, orderID int64) ([]model.Payment, error) {
-	rows, err := q.db.QueryContext(ctx,
-		`SELECT `+paymentColumns+` FROM payments WHERE order_id=? AND deleted_at IS NULL
-		 ORDER BY paid_at, id`, orderID)
-	if err != nil {
-		return nil, fmt.Errorf("list payments: %w", err)
-	}
-	defer rows.Close()
-
-	var out []model.Payment
-	for rows.Next() {
-		p, err := scanPayment(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan payment: %w", err)
-		}
-		out = append(out, *p)
-	}
-	return out, rows.Err()
-}
-
-// SumPayments 汇总某订单未删除的收款流水金额，是 orders.paid_amount 的唯一来源。
-func (q *queries) SumPayments(ctx context.Context, orderID int64) (int64, error) {
-	var sum sql.NullInt64
-	err := q.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(amount),0) FROM payments WHERE order_id=? AND deleted_at IS NULL`,
-		orderID).Scan(&sum)
-	if err != nil {
-		return 0, fmt.Errorf("sum payments: %w", err)
-	}
-	return sum.Int64, nil
-}
-
-func (q *queries) SoftDeletePayment(ctx context.Context, id, now int64) error {
-	res, err := q.db.ExecContext(ctx,
-		`UPDATE payments SET deleted_at=? WHERE id=? AND deleted_at IS NULL`, now, id)
-	if err != nil {
-		return fmt.Errorf("soft delete payment: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return errs.ErrNotFound
-	}
-	return nil
-}
-
 // ---------- 操作流水 ----------
 
 func (q *queries) InsertLog(ctx context.Context, l *model.OrderLog) error {
 	res, err := q.db.ExecContext(ctx,
-		`INSERT INTO order_logs(order_id, action, field, from_value, to_value, operator, remark, created_at)
-		 VALUES(?,?,?,?,?,?,?,?)`,
-		l.OrderID, l.Action, l.Field, l.FromValue, l.ToValue, l.Operator, l.Remark, l.CreatedAt)
+		`INSERT INTO order_logs(order_id, action, field, from_value, to_value, operator, remark,
+			amount, pay_method, created_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		l.OrderID, l.Action, l.Field, l.FromValue, l.ToValue, l.Operator, l.Remark,
+		l.Amount, string(l.PayMethod), l.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("insert log: %w", err)
 	}
@@ -658,7 +571,8 @@ func (q *queries) InsertLog(ctx context.Context, l *model.OrderLog) error {
 
 func (q *queries) ListLogsByOrder(ctx context.Context, orderID int64) ([]model.OrderLog, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT id, order_id, action, field, from_value, to_value, operator, remark, created_at
+		`SELECT id, order_id, action, field, from_value, to_value, operator, remark,
+		        amount, pay_method, created_at
 		 FROM order_logs WHERE order_id=? ORDER BY created_at, id`, orderID)
 	if err != nil {
 		return nil, fmt.Errorf("list logs: %w", err)
@@ -669,7 +583,7 @@ func (q *queries) ListLogsByOrder(ctx context.Context, orderID int64) ([]model.O
 	for rows.Next() {
 		var l model.OrderLog
 		if err := rows.Scan(&l.ID, &l.OrderID, &l.Action, &l.Field, &l.FromValue,
-			&l.ToValue, &l.Operator, &l.Remark, &l.CreatedAt); err != nil {
+			&l.ToValue, &l.Operator, &l.Remark, &l.Amount, &l.PayMethod, &l.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan log: %w", err)
 		}
 		out = append(out, l)

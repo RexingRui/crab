@@ -66,19 +66,6 @@ CREATE TABLE IF NOT EXISTS order_items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id);
 
--- ========== 收款流水 ==========
-CREATE TABLE IF NOT EXISTS payments (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id    INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    amount      INTEGER NOT NULL,                       -- 分；退款记负数
-    pay_method  TEXT    NOT NULL DEFAULT 'wechat',      -- wechat/alipay/cash/transfer/other
-    paid_at     INTEGER NOT NULL,
-    remark      TEXT    NOT NULL DEFAULT '',
-    created_at  INTEGER NOT NULL,
-    deleted_at  INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id, deleted_at);
-
 -- ========== 操作流水 ==========
 CREATE TABLE IF NOT EXISTS order_logs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,6 +76,8 @@ CREATE TABLE IF NOT EXISTS order_logs (
     to_value    TEXT    NOT NULL DEFAULT '',
     operator    TEXT    NOT NULL DEFAULT '',            -- openid 或 'system'
     remark      TEXT    NOT NULL DEFAULT '',
+    amount      INTEGER NOT NULL DEFAULT 0,             -- 收款/退款这一笔的金额（分），其他动作为 0
+    pay_method  TEXT    NOT NULL DEFAULT '',            -- 收款方式，只有收款/退款才有
     created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_logs_order ON order_logs(order_id, created_at);

@@ -192,10 +192,10 @@ func (q *queries) CountOrdersShippedBetween(ctx context.Context, start, end int6
 func (q *queries) SumPaymentsBetween(ctx context.Context, start, end int64) (int64, error) {
 	var sum int64
 	err := q.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(p.amount),0) FROM payments p
-		 JOIN orders o ON o.id = p.order_id
-		 WHERE p.deleted_at IS NULL AND o.deleted_at IS NULL
-		   AND p.paid_at >= ? AND p.paid_at <= ?`, start, end).Scan(&sum)
+		`SELECT COALESCE(SUM(l.amount),0) FROM order_logs l
+		 JOIN orders o ON o.id = l.order_id
+		 WHERE l.action IN ('pay','refund') AND o.deleted_at IS NULL
+		   AND l.created_at >= ? AND l.created_at <= ?`, start, end).Scan(&sum)
 	if err != nil {
 		return 0, fmt.Errorf("sum payments between: %w", err)
 	}

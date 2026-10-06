@@ -29,6 +29,7 @@ type ItemDTO struct {
 	PackSize int `json:"pack_size"`
 }
 
+// PaymentDTO 一笔收款或退款，取自操作流水里带金额的那几条。
 type PaymentDTO struct {
 	ID            int64  `json:"id"`
 	Amount        int64  `json:"amount"`
@@ -46,6 +47,7 @@ type LogDTO struct {
 	ToValue   string `json:"to_value"`
 	Operator  string `json:"operator"`
 	Remark    string `json:"remark"`
+	Amount    int64  `json:"amount"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -255,15 +257,15 @@ func toItemDTO(it model.OrderItem) ItemDTO {
 	}
 }
 
-func toPaymentDTO(p model.Payment) PaymentDTO {
+func toPaymentDTO(l model.OrderLog) PaymentDTO {
 	return PaymentDTO{
-		ID:            p.ID,
-		Amount:        p.Amount,
-		AmountYuan:    model.FormatYuan(p.Amount),
-		PayMethod:     string(p.PayMethod),
-		PayMethodText: p.PayMethod.Text(),
-		PaidAt:        timex.Format(p.PaidAt),
-		Remark:        p.Remark,
+		ID:            l.ID,
+		Amount:        l.Amount,
+		AmountYuan:    model.FormatYuan(l.Amount),
+		PayMethod:     string(l.PayMethod),
+		PayMethodText: l.PayMethod.Text(),
+		PaidAt:        timex.Format(l.CreatedAt),
+		Remark:        l.Remark,
 	}
 }
 
@@ -275,6 +277,7 @@ func toLogDTO(l model.OrderLog) LogDTO {
 		ToValue:   l.ToValue,
 		Operator:  l.Operator,
 		Remark:    l.Remark,
+		Amount:    l.Amount,
 		CreatedAt: timex.Format(l.CreatedAt),
 	}
 }
@@ -285,9 +288,11 @@ func ToOrderDTO(o *model.Order) OrderDTO {
 	for _, it := range o.Items {
 		items = append(items, toItemDTO(it))
 	}
-	payments := make([]PaymentDTO, 0, len(o.Payments))
-	for _, p := range o.Payments {
-		payments = append(payments, toPaymentDTO(p))
+	payments := make([]PaymentDTO, 0, 2)
+	for _, l := range o.Logs {
+		if l.IsPayment() {
+			payments = append(payments, toPaymentDTO(l))
+		}
 	}
 	logs := make([]LogDTO, 0, len(o.Logs))
 	for _, l := range o.Logs {
