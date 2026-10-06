@@ -28,9 +28,13 @@ export const api = {
   // to 只能是 pending / shipped，reason 必填
   revertShip: (id, to, reason) => post(`/api/orders/${id}/revert-ship`, { to, reason }),
 
+  // 运费：body 为 { freight_list, freight_cost, freight_basis, freight_fee }，金额都是分
+  setFreight: (id, body) => put(`/api/orders/${id}/freight`, body),
+  // 批量标记和快递结清；settled=false 为撤销
+  settleFreight: (ids, settled = true) => post('/api/orders/freight-settle', { ids, settled }),
+
   // 收款
   addPayment: (id, body) => post(`/api/orders/${id}/payments`, body),
-  removePayment: (paymentId) => del(`/api/payments/${paymentId}`),
 
   // 规格价目表：录单页只要启用中的，设置页要连停用的一起看
   specs: () => get('/api/specs'),

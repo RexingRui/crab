@@ -95,10 +95,11 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/orders/{id}/receive", a.ReceiveOrder)
 	mux.HandleFunc("POST /api/orders/{id}/cancel", a.CancelOrder)
 	mux.HandleFunc("POST /api/orders/{id}/revert-ship", a.RevertShip)
+	mux.HandleFunc("PUT /api/orders/{id}/freight", a.SetFreight)
+	mux.HandleFunc("POST /api/orders/freight-settle", a.SettleFreight)
 
 	// 收款
 	mux.HandleFunc("POST /api/orders/{id}/payments", a.AddPayment)
-	mux.HandleFunc("DELETE /api/payments/{id}", a.DeletePayment)
 
 	// 统计
 	mux.HandleFunc("GET /api/stats/dashboard", a.Dashboard)

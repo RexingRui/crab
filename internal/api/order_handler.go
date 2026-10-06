@@ -52,6 +52,8 @@ type itemReq struct {
 	Unit      model.Unit   `json:"unit"`
 	Quantity  int          `json:"quantity"`
 	UnitPrice int64        `json:"unit_price"`
+	// PackSize 按盒的明细一盒几只，可不传，后端会回价目表查。
+	PackSize int `json:"pack_size"`
 }
 
 func toItemInputs(in []itemReq) []service.ItemInput {
@@ -64,6 +66,7 @@ func toItemInputs(in []itemReq) []service.ItemInput {
 			Unit:      it.Unit,
 			Quantity:  it.Quantity,
 			UnitPrice: it.UnitPrice,
+			PackSize:  it.PackSize,
 		})
 	}
 	return out
@@ -224,6 +227,26 @@ type shipReq struct {
 	ShipCompany string   `json:"ship_company"`
 	TrackingNo  string   `json:"tracking_no"`
 	ShipTime    flexTime `json:"ship_time"`
+	// Freight 发货时顺手填运费，可不传，之后再走 PUT /freight 补。
+	Freight *freightReq `json:"freight"`
+}
+
+// freightReq 卖家填的运费，金额单位都是分。
+type freightReq struct {
+	FreightList  *int64             `json:"freight_list"`
+	FreightCost  *int64             `json:"freight_cost"`
+	FreightBasis model.FreightBasis `json:"freight_basis"`
+	// FreightFee 买家承担多少；不传就按规则算建议值。
+	FreightFee *int64 `json:"freight_fee"`
+}
+
+func (r *freightReq) input() service.FreightInput {
+	return service.FreightInput{
+		FreightList: r.FreightList,
+		FreightCost: r.FreightCost,
+		Basis:       r.FreightBasis,
+		BuyerFee:    r.FreightFee,
+	}
 }
 
 // ShipOrder POST /api/orders/{id}/ship
@@ -238,18 +261,68 @@ func (a *API) ShipOrder(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, err)
 		return
 	}
-	o, err := a.orders.Ship(r.Context(), service.ShipInput{
+	in := service.ShipInput{
 		ID:          id,
 		ShipCompany: req.ShipCompany,
 		TrackingNo:  req.TrackingNo,
 		ShipTime:    req.ShipTime.Ptr(),
 		Operator:    OpenIDFrom(r.Context()),
+	}
+	if req.Freight != nil {
+		f := req.Freight.input()
+		in.Freight = &f
+	}
+	o, err := a.orders.Ship(r.Context(), in)
+	if err != nil {
+		Fail(w, r, err)
+		return
+	}
+	OK(w, ToOrderDTO(o))
+}
+
+// SetFreight PUT /api/orders/{id}/freight
+func (a *API) SetFreight(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		Fail(w, r, err)
+		return
+	}
+	var req freightReq
+	if err := decodeJSON(r, &req); err != nil {
+		Fail(w, r, err)
+		return
+	}
+	o, err := a.orders.SetFreight(r.Context(), service.SetFreightInput{
+		ID:           id,
+		FreightInput: req.input(),
+		Operator:     OpenIDFrom(r.Context()),
 	})
 	if err != nil {
 		Fail(w, r, err)
 		return
 	}
 	OK(w, ToOrderDTO(o))
+}
+
+type settleFreightReq struct {
+	IDs     []int64 `json:"ids"`
+	Settled bool    `json:"settled"`
+}
+
+// SettleFreight POST /api/orders/freight-settle
+// 批量标记运费已和快递结清；settled=false 为撤销。
+func (a *API) SettleFreight(w http.ResponseWriter, r *http.Request) {
+	var req settleFreightReq
+	if err := decodeJSON(r, &req); err != nil {
+		Fail(w, r, err)
+		return
+	}
+	n, err := a.orders.SettleFreight(r.Context(), req.IDs, req.Settled, OpenIDFrom(r.Context()))
+	if err != nil {
+		Fail(w, r, err)
+		return
+	}
+	OK(w, map[string]any{"changed": n})
 }
 
 type receiveReq struct {
@@ -379,8 +452,9 @@ func (a *API) ExportOrders(w http.ResponseWriter, r *http.Request) {
 
 	_ = cw.Write([]string{
 		"单号", "创建时间", "收货人", "手机", "地址", "微信备注", "明细摘要",
-		"货款", "运费", "优惠", "应收", "实收", "未收",
+		"货款", "买家付运费", "优惠", "应收", "实收", "未收",
 		"发货状态", "收款状态", "快递公司", "运单号", "约定发货日", "发货时间", "备注", "来源",
+		"快递原价", "快递实付", "卖家承担运费", "运费已结",
 	})
 	for _, o := range list {
 		shipTime := ""
@@ -410,8 +484,29 @@ func (a *API) ExportOrders(w http.ResponseWriter, r *http.Request) {
 			shipTime,
 			o.Remark,
 			o.Source.Text(),
+			yuanOrEmpty(o.FreightList),
+			yuanOrEmpty(o.FreightCost),
+			model.FormatYuan(o.FreightSellerPart()),
+			settledText(o),
 		})
 	}
+}
+
+func yuanOrEmpty(v *int64) string {
+	if v == nil {
+		return ""
+	}
+	return model.FormatYuan(*v)
+}
+
+func settledText(o *model.Order) string {
+	switch {
+	case o.FreightCost == nil:
+		return ""
+	case o.FreightSettledAt != nil:
+		return "已结"
+	}
+	return "未结"
 }
 
 // ---------- 查询参数解析 ----------
@@ -445,6 +540,12 @@ func parseOrderFilter(r *http.Request, paginate bool) (model.OrderFilter, error)
 			return f, errs.InvalidParam("source 非法，应为 manual/web")
 		}
 		f.Source = src
+	}
+	switch v := strings.TrimSpace(q.Get("freight")); v {
+	case "", model.FreightFilterPending, model.FreightFilterUnsettled, model.FreightFilterSettled:
+		f.Freight = v
+	default:
+		return f, errs.InvalidParam("freight 非法，应为 pending/unsettled/settled")
 	}
 	for _, v := range splitCSV(q.Get("pay_status")) {
 		s := model.PayStatus(v)

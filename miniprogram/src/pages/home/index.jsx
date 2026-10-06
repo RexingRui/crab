@@ -66,6 +66,7 @@ export default function Home() {
   const today = new Date()
   // dashboard 是 { today, pending, range } 三段式
   const pending = (dash && dash.pending) || {}
+  const freight = (dash && dash.freight) || {}
   const shown = plan.slice(0, PLAN_LIMIT)
   const restCount = Math.max(0, plan.length - PLAN_LIMIT)
 
@@ -142,6 +143,25 @@ export default function Home() {
           <Text className='home__stat-value num'>{pending.shipped_not_received_count || 0} 单</Text>
           <Text className='home__stat-arrow'>›</Text>
         </View>
+        <View className='divider' />
+        <View className='home__stat' onClick={() => goList({ freight: 'unsettled' })}>
+          <Text className='home__stat-label'>运费还没和快递结</Text>
+          <Text className='home__stat-value money'>
+            {fenToYuan(freight.unsettled_cost || 0)}
+            <Text className='sub'> · {freight.unsettled_count || 0} 单</Text>
+          </Text>
+          <Text className='home__stat-arrow'>›</Text>
+        </View>
+        {freight.shipped_pending_count ? (
+          <>
+            <View className='divider' />
+            <View className='home__stat' onClick={() => goList({ freight: 'pending', ship_status: 'shipped' })}>
+              <Text className='home__stat-label'>发了还没填运费</Text>
+              <Text className='home__stat-value num'>{freight.shipped_pending_count} 单</Text>
+              <Text className='home__stat-arrow'>›</Text>
+            </View>
+          </>
+        ) : null}
       </View>
 
       <View className='section'>

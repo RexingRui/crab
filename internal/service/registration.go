@@ -36,6 +36,10 @@ const (
 var ErrDuplicateRegistration = errs.New(errs.CodeIdempotent,
 	"这个手机号今天已经登记过了，要改或者要再订一份，说一声就行")
 
+// ErrRegistrationRevoked 这条链接登记的单已被卖家删掉。一条链接只落一单，删了也不能再用。
+var ErrRegistrationRevoked = errs.New(errs.CodeStateConflict,
+	"这条链接登记的订单已经被卖家撤销了，要重新订请找卖家要一条新链接")
+
 // RegistrationItemInput 买家选的一档。没有 unit_price，故意的。
 type RegistrationItemInput struct {
 	SpecID int64
@@ -113,6 +117,11 @@ func (s *OrderService) CreateRegistration(ctx context.Context, in RegistrationIn
 		return existing, true, nil
 	} else if !errors.Is(err, errs.ErrNotFound) {
 		return nil, false, errs.Internal(err)
+	}
+	if deleted, err := s.st.RequestIDDeleted(ctx, requestID); err != nil {
+		return nil, false, errs.Internal(err)
+	} else if deleted {
+		return nil, false, ErrRegistrationRevoked
 	}
 
 	// 手机号查重：挡的是「拿了两条链接重复填」和误提交。

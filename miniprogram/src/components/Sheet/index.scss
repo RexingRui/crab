@@ -30,12 +30,16 @@
   &__title { font-size: 30px; font-weight: 600; }
   &__close { font-size: 26px; color: $muted; }
 
+  // 内容超过 80vh 时只滚 body：flex 子项默认 min-height:auto 不肯缩，按钮会被挤出屏幕
   &__body {
+    flex: 1;
+    min-height: 0;
     padding: 0 24px 24px;
     overflow-y: auto;
   }
 
   &__foot {
+    flex-shrink: 0;
     padding: 16px 24px 24px;
     border-top: 1px solid $line;
     display: flex;

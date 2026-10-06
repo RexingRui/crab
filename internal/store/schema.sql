@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS orders (
     first_pay_time    INTEGER,                          -- 首次收款时间
     settled_time      INTEGER,                          -- 付清时间
 
+    -- 运费（只给卖家看；freight_fee 是买家承担的那部分）
+    freight_list      INTEGER,                          -- 快递原价（分）
+    freight_cost      INTEGER,                          -- 用券后的实付（分），NULL = 运费待定
+    freight_basis     TEXT    NOT NULL DEFAULT '',      -- 买家补多少按 list(原价) / actual(实付) 算
+    freight_rule_ver  TEXT    NOT NULL DEFAULT 'v1',    -- 建单时的补贴规则版本
+    freight_settled_at INTEGER,                         -- 和快递结清的时间
+
     remark            TEXT    NOT NULL DEFAULT '',
     source            TEXT    NOT NULL DEFAULT 'manual',  -- manual=卖家录入 / web=买家自助登记
     created_at        INTEGER NOT NULL,
@@ -61,22 +68,10 @@ CREATE TABLE IF NOT EXISTS order_items (
     quantity    INTEGER NOT NULL,
     unit_price  INTEGER NOT NULL,                       -- 单价快照（分）
     amount      INTEGER NOT NULL,                       -- = quantity * unit_price
+    crab_count  INTEGER NOT NULL DEFAULT 0,             -- 折合只数：按只=数量，按盒=盒数×每盒只数，按斤=0
     sort_no     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id);
-
--- ========== 收款流水 ==========
-CREATE TABLE IF NOT EXISTS payments (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id    INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    amount      INTEGER NOT NULL,                       -- 分；退款记负数
-    pay_method  TEXT    NOT NULL DEFAULT 'wechat',      -- wechat/alipay/cash/transfer/other
-    paid_at     INTEGER NOT NULL,
-    remark      TEXT    NOT NULL DEFAULT '',
-    created_at  INTEGER NOT NULL,
-    deleted_at  INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id, deleted_at);
 
 -- ========== 操作流水 ==========
 CREATE TABLE IF NOT EXISTS order_logs (
@@ -88,6 +83,8 @@ CREATE TABLE IF NOT EXISTS order_logs (
     to_value    TEXT    NOT NULL DEFAULT '',
     operator    TEXT    NOT NULL DEFAULT '',            -- openid 或 'system'
     remark      TEXT    NOT NULL DEFAULT '',
+    amount      INTEGER NOT NULL DEFAULT 0,             -- 收款/退款这一笔的金额（分），其他动作为 0
+    pay_method  TEXT    NOT NULL DEFAULT '',            -- 收款方式，只有收款/退款才有
     created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_logs_order ON order_logs(order_id, created_at);

@@ -283,7 +283,7 @@ func TestIdempotentCreate(t *testing.T) {
 	}
 }
 
-// TestPaymentFlow 部分收款 → partial → 补尾款 → paid → 删一笔 → 退回 partial。
+// TestPaymentFlow 部分收款 → partial → 补尾款 → paid → 冲正一笔 → 退回 partial。
 func TestPaymentFlow(t *testing.T) {
 	e := newTestEnv(t)
 	o := decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", sampleOrderBody()))
@@ -312,14 +312,22 @@ func TestPaymentFlow(t *testing.T) {
 		t.Fatalf("应有 2 条收款流水，实际 %d", len(paid.Payments))
 	}
 
-	// 删掉尾款
-	back := decodeOrder(t, e.mustOK(t, http.MethodDelete,
-		"/api/payments/"+itoa(paid.Payments[1].ID), nil))
+	if paid.Payments[0].Remark != "定金" || paid.Payments[0].PayMethod != "wechat" {
+		t.Errorf("收款记录没带上方式和备注: %+v", paid.Payments[0])
+	}
+
+	// 尾款记错了，记一笔负数冲掉
+	back := decodeOrder(t, e.mustOK(t, http.MethodPost, path+"/payments", map[string]any{
+		"amount": -39000, "remark": "记错了",
+	}))
 	if back.PayStatus != "partial" || back.PaidAmount != 40000 {
-		t.Errorf("删除尾款后应退回 partial，实际 %s paid=%d", back.PayStatus, back.PaidAmount)
+		t.Errorf("冲正后应退回 partial，实际 %s paid=%d", back.PayStatus, back.PaidAmount)
 	}
 	if back.SettledTime != nil {
 		t.Error("退回 partial 后 settled_time 应清空")
+	}
+	if len(back.Payments) != 3 {
+		t.Errorf("冲正也该留一条记录，实际 %d 条", len(back.Payments))
 	}
 }
 

@@ -20,6 +20,9 @@ type Queries interface {
 	GetOrderByID(ctx context.Context, id int64) (*model.Order, error)
 	GetOrderByNo(ctx context.Context, orderNo string) (*model.Order, error)
 	GetOrderByRequestID(ctx context.Context, requestID string) (*model.Order, error)
+	// RequestIDDeleted 这个幂等键是否属于一笔已软删除的订单。唯一索引不看 deleted_at，
+	// 所以这种键再也建不了单，调用方要据此给出提示，而不是去撞索引。
+	RequestIDDeleted(ctx context.Context, requestID string) (bool, error)
 	// ListOrders 返回一页订单与符合条件的总数。f.PageSize <= 0 表示不分页（导出用）。
 	ListOrders(ctx context.Context, f model.OrderFilter) ([]*model.Order, int, error)
 	// CountOrdersByPhoneSince 统计某手机号在 since 之后（含）创建的未删除订单数，
@@ -32,13 +35,6 @@ type Queries interface {
 	DeleteItems(ctx context.Context, orderID int64) error
 	ListItemsByOrder(ctx context.Context, orderID int64) ([]model.OrderItem, error)
 	ListItemsByOrders(ctx context.Context, orderIDs []int64) (map[int64][]model.OrderItem, error)
-
-	// ---------- 收款 ----------
-	InsertPayment(ctx context.Context, p *model.Payment) error
-	GetPaymentByID(ctx context.Context, id int64) (*model.Payment, error)
-	ListPaymentsByOrder(ctx context.Context, orderID int64) ([]model.Payment, error)
-	SumPayments(ctx context.Context, orderID int64) (int64, error)
-	SoftDeletePayment(ctx context.Context, id, now int64) error
 
 	// ---------- 操作流水 ----------
 	InsertLog(ctx context.Context, l *model.OrderLog) error
@@ -61,12 +57,31 @@ type Queries interface {
 	// ---------- 统计 ----------
 	CountOrdersCreatedBetween(ctx context.Context, start, end int64) (int, error)
 	CountOrdersShippedBetween(ctx context.Context, start, end int64) (int, error)
+	// SumPaymentsBetween 区间内记下的收款减退款，取自操作流水。
 	SumPaymentsBetween(ctx context.Context, start, end int64) (int64, error)
 	CountOrdersByShipStatus(ctx context.Context, status model.ShipStatus) (int, error)
 	CountPendingByExpectDate(ctx context.Context, date string) (int, error)
 	UnpaidSummary(ctx context.Context) (count int, amount int64, err error)
 	RangeSummary(ctx context.Context, start, end int64) (RangeSummary, error)
 	SpecStatsBetween(ctx context.Context, start, end int64) ([]model.SpecStat, error)
+	FreightSummary(ctx context.Context, start, end int64) (FreightSummary, error)
+}
+
+// FreightSummary 运费汇总，只给卖家看。
+type FreightSummary struct {
+	// 区间内（按建单时间）已填运费的单
+	RangeCount int
+	ListTotal  int64 // 原价合计
+	CostTotal  int64 // 实付合计
+	BuyerTotal int64 // 买家承担合计
+
+	// 不分区间：填了运费还没和快递结的单
+	UnsettledCount int
+	UnsettledCost  int64
+	UnsettledList  int64
+
+	// 不分区间：已经发出去了、运费还没填的单
+	ShippedPendingCount int
 }
 
 // RangeSummary 区间统计结果。

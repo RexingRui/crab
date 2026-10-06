@@ -75,3 +75,14 @@
     }
   }
 }
+
+.orders__settle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 24px 24px;
+  padding: 24px;
+}
+
+.orders__settle-sum { display: block; margin-top: 8px; }

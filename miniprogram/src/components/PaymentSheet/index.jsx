@@ -44,7 +44,7 @@ export default function PaymentSheet({ visible, order, submitting, onClose, onSu
         </View>
       }
     >
-      <Text className='sub'>金额（填负数就是退回去的钱）</Text>
+      <Text className='sub'>金额（填负数就是退回去的钱；记错了也是再记一笔负数冲掉）</Text>
       <Input
         className='payment-sheet__amount num'
         type='digit'
@@ -70,7 +70,7 @@ export default function PaymentSheet({ visible, order, submitting, onClose, onSu
       <Input
         className='payment-sheet__input'
         value={remark}
-        placeholder='比如：定金'
+        placeholder='比如：定金、补运费'
         onInput={(e) => setRemark(e.detail.value)}
       />
     </Sheet>

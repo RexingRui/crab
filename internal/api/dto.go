@@ -24,8 +24,12 @@ type ItemDTO struct {
 	UnitPriceYuan string `json:"unit_price_yuan"`
 	Amount        int64  `json:"amount"`
 	AmountYuan    string `json:"amount_yuan"`
+	CrabCount     int    `json:"crab_count"`
+	// PackSize 按盒的明细一盒几只（由只数快照反推），改单时原样回传即可。
+	PackSize int `json:"pack_size"`
 }
 
+// PaymentDTO 一笔收款或退款，取自操作流水里带金额的那几条。
 type PaymentDTO struct {
 	ID            int64  `json:"id"`
 	Amount        int64  `json:"amount"`
@@ -43,6 +47,7 @@ type LogDTO struct {
 	ToValue   string `json:"to_value"`
 	Operator  string `json:"operator"`
 	Remark    string `json:"remark"`
+	Amount    int64  `json:"amount"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -69,6 +74,8 @@ type OrderDTO struct {
 	PaidAmountYuan    string `json:"paid_amount_yuan"`
 	UnpaidAmount      int64  `json:"unpaid_amount"`
 	UnpaidAmountYuan  string `json:"unpaid_amount_yuan"`
+
+	FreightDTO
 
 	ShipStatus     string `json:"ship_status"`
 	ShipStatusText string `json:"ship_status_text"`
@@ -97,6 +104,63 @@ type OrderDTO struct {
 	Idempotent bool `json:"idempotent,omitempty"`
 }
 
+// FreightDTO 运费明细，只出现在卖家能看到的订单数据里（买家查单、登记回执都没有）。
+// freight_fee 是买家承担的部分，已在上面的金额字段里。
+type FreightDTO struct {
+	FreightList      *int64  `json:"freight_list"`
+	FreightListYuan  *string `json:"freight_list_yuan"`
+	FreightCost      *int64  `json:"freight_cost"`
+	FreightCostYuan  *string `json:"freight_cost_yuan"`
+	FreightBasis     string  `json:"freight_basis"`
+	FreightBasisText string  `json:"freight_basis_text"`
+	// FreightSeller 卖家承担 = 实付 - 买家承担；运费没填时为 0。
+	FreightSeller     int64  `json:"freight_seller"`
+	FreightSellerYuan string `json:"freight_seller_yuan"`
+	// FreightPending 运费还没填。货款付清了也要提示「运费待定」。
+	FreightPending   bool    `json:"freight_pending"`
+	FreightSettledAt *string `json:"freight_settled_at"`
+	FreightRuleVer   string  `json:"freight_rule_ver"`
+	// FreightSellerCap 按这单只数和建单时的规则，卖家最多补多少。
+	// 前端用它现算建议值：买家补 = max(0, 口径金额 - 这个数)。
+	FreightSellerCap int64 `json:"freight_seller_cap"`
+	// FreightDefaultBasis 这单规则的默认口径，填运费时预选。
+	FreightDefaultBasis string `json:"freight_default_basis"`
+	CrabCount           int    `json:"crab_count"`
+}
+
+func toFreightDTO(o *model.Order) FreightDTO {
+	rule := model.FreightRuleOf(o.FreightRuleVer)
+	crabs := o.CrabCount()
+	basisText := ""
+	if o.FreightBasis != "" {
+		basisText = o.FreightBasis.Text()
+	}
+	return FreightDTO{
+		FreightList:         o.FreightList,
+		FreightListYuan:     yuanPtr(o.FreightList),
+		FreightCost:         o.FreightCost,
+		FreightCostYuan:     yuanPtr(o.FreightCost),
+		FreightBasis:        string(o.FreightBasis),
+		FreightBasisText:    basisText,
+		FreightSeller:       o.FreightSellerPart(),
+		FreightSellerYuan:   model.FormatYuan(o.FreightSellerPart()),
+		FreightPending:      o.FreightPending(),
+		FreightSettledAt:    timex.FormatPtr(o.FreightSettledAt),
+		FreightRuleVer:      rule.Version,
+		FreightSellerCap:    rule.SellerCap(crabs),
+		FreightDefaultBasis: string(rule.DefaultBasis),
+		CrabCount:           crabs,
+	}
+}
+
+func yuanPtr(v *int64) *string {
+	if v == nil {
+		return nil
+	}
+	s := model.FormatYuan(*v)
+	return &s
+}
+
 // OrderSummaryDTO 是列表用的订单摘要：不含 items / payments / logs 全量，
 // 只带一个 items_summary 字符串，显著减少列表体积。
 type OrderSummaryDTO struct {
@@ -121,6 +185,8 @@ type OrderSummaryDTO struct {
 	PaidAmountYuan    string `json:"paid_amount_yuan"`
 	UnpaidAmount      int64  `json:"unpaid_amount"`
 	UnpaidAmountYuan  string `json:"unpaid_amount_yuan"`
+
+	FreightDTO
 
 	ShipStatus     string `json:"ship_status"`
 	ShipStatusText string `json:"ship_status_text"`
@@ -230,6 +296,10 @@ func nilIfEmpty(s string) *string {
 }
 
 func toItemDTO(it model.OrderItem) ItemDTO {
+	pack := 0
+	if it.Unit == model.UnitBox && it.Quantity > 0 {
+		pack = it.CrabCount / it.Quantity
+	}
 	return ItemDTO{
 		ID:            it.ID,
 		Gender:        string(it.Gender),
@@ -243,18 +313,20 @@ func toItemDTO(it model.OrderItem) ItemDTO {
 		UnitPriceYuan: model.FormatYuan(it.UnitPrice),
 		Amount:        it.Amount,
 		AmountYuan:    model.FormatYuan(it.Amount),
+		CrabCount:     it.CrabCount,
+		PackSize:      pack,
 	}
 }
 
-func toPaymentDTO(p model.Payment) PaymentDTO {
+func toPaymentDTO(l model.OrderLog) PaymentDTO {
 	return PaymentDTO{
-		ID:            p.ID,
-		Amount:        p.Amount,
-		AmountYuan:    model.FormatYuan(p.Amount),
-		PayMethod:     string(p.PayMethod),
-		PayMethodText: p.PayMethod.Text(),
-		PaidAt:        timex.Format(p.PaidAt),
-		Remark:        p.Remark,
+		ID:            l.ID,
+		Amount:        l.Amount,
+		AmountYuan:    model.FormatYuan(l.Amount),
+		PayMethod:     string(l.PayMethod),
+		PayMethodText: l.PayMethod.Text(),
+		PaidAt:        timex.Format(l.CreatedAt),
+		Remark:        l.Remark,
 	}
 }
 
@@ -266,6 +338,7 @@ func toLogDTO(l model.OrderLog) LogDTO {
 		ToValue:   l.ToValue,
 		Operator:  l.Operator,
 		Remark:    l.Remark,
+		Amount:    l.Amount,
 		CreatedAt: timex.Format(l.CreatedAt),
 	}
 }
@@ -276,9 +349,11 @@ func ToOrderDTO(o *model.Order) OrderDTO {
 	for _, it := range o.Items {
 		items = append(items, toItemDTO(it))
 	}
-	payments := make([]PaymentDTO, 0, len(o.Payments))
-	for _, p := range o.Payments {
-		payments = append(payments, toPaymentDTO(p))
+	payments := make([]PaymentDTO, 0, 2)
+	for _, l := range o.Logs {
+		if l.IsPayment() {
+			payments = append(payments, toPaymentDTO(l))
+		}
 	}
 	logs := make([]LogDTO, 0, len(o.Logs))
 	for _, l := range o.Logs {
@@ -307,6 +382,8 @@ func ToOrderDTO(o *model.Order) OrderDTO {
 		PaidAmountYuan:    model.FormatYuan(o.PaidAmount),
 		UnpaidAmount:      o.UnpaidAmount(),
 		UnpaidAmountYuan:  model.FormatYuan(o.UnpaidAmount()),
+
+		FreightDTO: toFreightDTO(o),
 
 		ShipStatus:     string(o.ShipStatus),
 		ShipStatusText: o.ShipStatus.Text(),
@@ -356,6 +433,8 @@ func ToOrderSummaryDTO(o *model.Order) OrderSummaryDTO {
 		PaidAmountYuan:    model.FormatYuan(o.PaidAmount),
 		UnpaidAmount:      o.UnpaidAmount(),
 		UnpaidAmountYuan:  model.FormatYuan(o.UnpaidAmount()),
+
+		FreightDTO: toFreightDTO(o),
 
 		ShipStatus:     string(o.ShipStatus),
 		ShipStatusText: o.ShipStatus.Text(),

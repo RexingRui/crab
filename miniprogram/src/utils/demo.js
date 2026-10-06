@@ -36,6 +36,12 @@ function materialize(order) {
     receive_time: stamp(order.receive_day_offset, '18:05'),
     ship_status_text: statusText('ship', order.ship_status),
     pay_status_text: statusText('pay', order.pay_status),
+    // 演示数据不带运费明细：一律当作还没填，卖家补贴按第一档
+    freight_list: null,
+    freight_cost: null,
+    freight_pending: order.ship_status !== 'cancelled',
+    freight_seller_cap: 2000,
+    crab_count: (order.items || []).reduce((n, i) => n + (i.crab_count ?? i.quantity), 0),
     payments: (order.payments || []).map((p) => ({ ...p, paid_at: stamp(p.day_offset, p.time) })),
     logs: (order.logs || []).map((l) => ({ ...l, created_at: stamp(l.day_offset, l.time) }))
   }
@@ -113,7 +119,7 @@ function dashboard() {
       order_count: live.length,
       payable_total: live.reduce((sum, o) => sum + o.payable_amount, 0),
       paid_total: live.reduce((sum, o) => sum + o.paid_amount, 0),
-      crab_count: live.reduce((sum, o) => sum + o.items.reduce((n, i) => n + i.quantity, 0), 0),
+      crab_count: live.reduce((sum, o) => sum + o.items.reduce((n, i) => n + (i.crab_count ?? i.quantity), 0), 0),
       by_spec: []
     }
   }

@@ -14,9 +14,26 @@ var schemaSQL string
 // addedColumns 是建表之后才加进来的列。schema.sql 里的 CREATE TABLE 带 IF NOT EXISTS，
 // 对已经建过表的库不会生效，所以增量列得单独补一次。
 // SQLite 没有 ADD COLUMN IF NOT EXISTS，只能先查 pragma_table_info 再决定加不加。
-var addedColumns = []struct{ table, column, ddl string }{
-	{"orders", "source", "ALTER TABLE orders ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"},
-	{"specs", "pack_size", "ALTER TABLE specs ADD COLUMN pack_size INTEGER NOT NULL DEFAULT 0"},
+// backfill 只在这一列刚加上时跑一次，给老数据补值。
+var addedColumns = []struct{ table, column, ddl, backfill string }{
+	{"orders", "source", "ALTER TABLE orders ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'", ""},
+	{"specs", "pack_size", "ALTER TABLE specs ADD COLUMN pack_size INTEGER NOT NULL DEFAULT 0", ""},
+	{"order_items", "crab_count", "ALTER TABLE order_items ADD COLUMN crab_count INTEGER NOT NULL DEFAULT 0",
+		// 老明细没记每盒几只，按「性别 + 克重 + 单位」回价目表找；找不到的盒按 0 只算。
+		`UPDATE order_items SET crab_count = CASE unit
+			WHEN 'piece' THEN quantity
+			WHEN 'box' THEN quantity * COALESCE((SELECT s.pack_size FROM specs s
+				WHERE s.gender = order_items.gender AND s.spec_gram = order_items.spec_gram
+				  AND s.unit = 'box'), 0)
+			ELSE 0 END`},
+	{"orders", "freight_list", "ALTER TABLE orders ADD COLUMN freight_list INTEGER", ""},
+	{"orders", "freight_cost", "ALTER TABLE orders ADD COLUMN freight_cost INTEGER", ""},
+	{"orders", "freight_basis", "ALTER TABLE orders ADD COLUMN freight_basis TEXT NOT NULL DEFAULT ''", ""},
+	// 老单一律算第一版规则：上线这版规则之前没有别的规则
+	{"orders", "freight_rule_ver", "ALTER TABLE orders ADD COLUMN freight_rule_ver TEXT NOT NULL DEFAULT 'v1'", ""},
+	{"orders", "freight_settled_at", "ALTER TABLE orders ADD COLUMN freight_settled_at INTEGER", ""},
+	{"order_logs", "amount", "ALTER TABLE order_logs ADD COLUMN amount INTEGER NOT NULL DEFAULT 0", ""},
+	{"order_logs", "pay_method", "ALTER TABLE order_logs ADD COLUMN pay_method TEXT NOT NULL DEFAULT ''", ""},
 }
 
 // Migrate 建表（全部语句都是 IF NOT EXISTS，可重复执行），再补增量列。
@@ -35,8 +52,44 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		if _, err := s.db.ExecContext(ctx, c.ddl); err != nil {
 			return fmt.Errorf("migrate add column %s.%s: %w", c.table, c.column, err)
 		}
+		if c.backfill != "" {
+			if _, err := s.db.ExecContext(ctx, c.backfill); err != nil {
+				return fmt.Errorf("migrate backfill %s.%s: %w", c.table, c.column, err)
+			}
+		}
 	}
-	return nil
+	return s.migrateLegacyPayments(ctx)
+}
+
+// migrateLegacyPayments 收款流水表已经并进操作流水。老库里还在的 payments 表：
+// 把没删的每一笔抄进 order_logs（金额、方式、备注、收款时间），再改名成 payments_legacy 留底。
+// 改名之后这一步就不会再跑，可重复执行。
+func (s *SQLiteStore) migrateLegacyPayments(ctx context.Context) error {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='payments'`).Scan(&n); err != nil {
+		return fmt.Errorf("check payments table: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO order_logs(order_id, action, field, from_value, to_value, operator, remark,
+				amount, pay_method, created_at)
+			 SELECT order_id, CASE WHEN amount < 0 THEN 'refund' ELSE 'pay' END, 'paid_amount', '', '',
+				'', remark, amount, pay_method, paid_at
+			 FROM payments WHERE deleted_at IS NULL`); err != nil {
+		return fmt.Errorf("copy payments to logs: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE payments RENAME TO payments_legacy`); err != nil {
+		return fmt.Errorf("rename payments: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) hasColumn(ctx context.Context, table, column string) (bool, error) {

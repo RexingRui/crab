@@ -174,6 +174,7 @@ const orderColumns = `id, order_no, request_id, receiver_name, phone, address,
 	wechat_nick, wechat_remark, goods_amount, freight_fee, discount, payable_amount,
 	paid_amount, ship_status, pay_status, ship_company, tracking_no, expect_ship_date,
 	ship_time, receive_time, first_pay_time, settled_time, remark, source,
+	freight_list, freight_cost, freight_basis, freight_rule_ver, freight_settled_at,
 	created_at, updated_at, deleted_at`
 
 type rowScanner interface {
@@ -190,6 +191,9 @@ func scanOrder(sc rowScanner) (*model.Order, error) {
 		firstPay sql.NullInt64
 		settled  sql.NullInt64
 		deleted  sql.NullInt64
+		fList    sql.NullInt64
+		fCost    sql.NullInt64
+		fSettled sql.NullInt64
 	)
 	err := sc.Scan(
 		&o.ID, &o.OrderNo, &reqID, &o.ReceiverName, &o.Phone, &o.Address,
@@ -197,6 +201,7 @@ func scanOrder(sc rowScanner) (*model.Order, error) {
 		&o.PayableAmount, &o.PaidAmount, &o.ShipStatus, &o.PayStatus,
 		&o.ShipCompany, &o.TrackingNo, &expect,
 		&shipT, &recvT, &firstPay, &settled, &o.Remark, &o.Source,
+		&fList, &fCost, &o.FreightBasis, &o.FreightRuleVer, &fSettled,
 		&o.CreatedAt, &o.UpdatedAt, &deleted,
 	)
 	if err != nil {
@@ -212,7 +217,18 @@ func scanOrder(sc rowScanner) (*model.Order, error) {
 	o.FirstPayTime = toPtr(firstPay)
 	o.SettledTime = toPtr(settled)
 	o.DeletedAt = toPtr(deleted)
+	o.FreightList = toPtr(fList)
+	o.FreightCost = toPtr(fCost)
+	o.FreightSettledAt = toPtr(fSettled)
 	return &o, nil
+}
+
+// ruleVerOrDefault 漏传规则版本就记当前版。规则版本建单后不再改，UpdateOrder 不写这一列。
+func ruleVerOrDefault(v string) string {
+	if v == "" {
+		return model.CurrentFreightRuleVer()
+	}
+	return v
 }
 
 // sourceOrDefault 兜住零值：订单来源不写死在调用方，漏传就是卖家自己录的。
@@ -229,8 +245,9 @@ func (q *queries) InsertOrder(ctx context.Context, o *model.Order) error {
 		goods_amount, freight_fee, discount, payable_amount, paid_amount,
 		ship_status, pay_status, ship_company, tracking_no, expect_ship_date,
 		ship_time, receive_time, first_pay_time, settled_time, remark, source,
+		freight_list, freight_cost, freight_basis, freight_rule_ver, freight_settled_at,
 		created_at, updated_at, deleted_at)
-	VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 
 	res, err := q.db.ExecContext(ctx, sqlStr,
 		o.OrderNo, nullString(o.RequestID), o.ReceiverName, o.Phone, o.Address,
@@ -239,7 +256,10 @@ func (q *queries) InsertOrder(ctx context.Context, o *model.Order) error {
 		string(o.ShipStatus), string(o.PayStatus), o.ShipCompany, o.TrackingNo,
 		nullString(o.ExpectShipDate),
 		nullInt(o.ShipTime), nullInt(o.ReceiveTime), nullInt(o.FirstPayTime), nullInt(o.SettledTime),
-		o.Remark, string(sourceOrDefault(o.Source)), o.CreatedAt, o.UpdatedAt, nullInt(o.DeletedAt),
+		o.Remark, string(sourceOrDefault(o.Source)),
+		nullInt(o.FreightList), nullInt(o.FreightCost), string(o.FreightBasis), ruleVerOrDefault(o.FreightRuleVer),
+		nullInt(o.FreightSettledAt),
+		o.CreatedAt, o.UpdatedAt, nullInt(o.DeletedAt),
 	)
 	if err != nil {
 		if IsUniqueViolation(err) {
@@ -261,6 +281,7 @@ func (q *queries) UpdateOrder(ctx context.Context, o *model.Order, expectUpdated
 		goods_amount=?, freight_fee=?, discount=?, payable_amount=?, paid_amount=?,
 		ship_status=?, pay_status=?, ship_company=?, tracking_no=?, expect_ship_date=?,
 		ship_time=?, receive_time=?, first_pay_time=?, settled_time=?, remark=?,
+		freight_list=?, freight_cost=?, freight_basis=?, freight_settled_at=?,
 		updated_at=?, deleted_at=?
 	WHERE id=?`
 	args := []any{
@@ -269,7 +290,9 @@ func (q *queries) UpdateOrder(ctx context.Context, o *model.Order, expectUpdated
 		string(o.ShipStatus), string(o.PayStatus), o.ShipCompany, o.TrackingNo,
 		nullString(o.ExpectShipDate),
 		nullInt(o.ShipTime), nullInt(o.ReceiveTime), nullInt(o.FirstPayTime), nullInt(o.SettledTime),
-		o.Remark, o.UpdatedAt, nullInt(o.DeletedAt), o.ID,
+		o.Remark,
+		nullInt(o.FreightList), nullInt(o.FreightCost), string(o.FreightBasis), nullInt(o.FreightSettledAt),
+		o.UpdatedAt, nullInt(o.DeletedAt), o.ID,
 	}
 	if expectUpdatedAt > 0 {
 		sqlStr += ` AND updated_at=?`
@@ -321,6 +344,19 @@ func (q *queries) GetOrderByRequestID(ctx context.Context, requestID string) (*m
 	return q.getOrderBy(ctx, "request_id=?", requestID)
 }
 
+func (q *queries) RequestIDDeleted(ctx context.Context, requestID string) (bool, error) {
+	if requestID == "" {
+		return false, nil
+	}
+	var n int
+	err := q.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM orders WHERE request_id=? AND deleted_at IS NOT NULL`, requestID).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("request id deleted: %w", err)
+	}
+	return n > 0, nil
+}
+
 func (q *queries) CountOrdersByPhoneSince(ctx context.Context, phone string, since int64) (int, error) {
 	var n int
 	err := q.db.QueryRowContext(ctx,
@@ -356,6 +392,14 @@ func buildOrderFilter(f model.OrderFilter) (string, []any) {
 	if f.Source != "" {
 		where = append(where, "source = ?")
 		args = append(args, string(f.Source))
+	}
+	switch f.Freight {
+	case model.FreightFilterPending:
+		where = append(where, "freight_cost IS NULL AND ship_status != 'cancelled'")
+	case model.FreightFilterUnsettled:
+		where = append(where, "freight_cost IS NOT NULL AND freight_settled_at IS NULL")
+	case model.FreightFilterSettled:
+		where = append(where, "freight_settled_at IS NOT NULL")
 	}
 	if f.Keyword != "" {
 		p := likePattern(f.Keyword)
@@ -457,11 +501,11 @@ func (q *queries) SoftDeleteOrder(ctx context.Context, id, now int64) error {
 
 func (q *queries) InsertItems(ctx context.Context, orderID int64, items []model.OrderItem) error {
 	const sqlStr = `INSERT INTO order_items(order_id, gender, spec_gram, spec_label, unit,
-		quantity, unit_price, amount, sort_no) VALUES(?,?,?,?,?,?,?,?,?)`
+		quantity, unit_price, amount, crab_count, sort_no) VALUES(?,?,?,?,?,?,?,?,?,?)`
 	for i := range items {
 		it := &items[i]
 		res, err := q.db.ExecContext(ctx, sqlStr, orderID, string(it.Gender), it.SpecGram,
-			it.SpecLabel, string(it.Unit), it.Quantity, it.UnitPrice, it.Amount, it.SortNo)
+			it.SpecLabel, string(it.Unit), it.Quantity, it.UnitPrice, it.Amount, it.CrabCount, it.SortNo)
 		if err != nil {
 			return fmt.Errorf("insert item: %w", err)
 		}
@@ -487,7 +531,7 @@ func scanItems(rows *sql.Rows) ([]model.OrderItem, error) {
 	for rows.Next() {
 		var it model.OrderItem
 		if err := rows.Scan(&it.ID, &it.OrderID, &it.Gender, &it.SpecGram, &it.SpecLabel,
-			&it.Unit, &it.Quantity, &it.UnitPrice, &it.Amount, &it.SortNo); err != nil {
+			&it.Unit, &it.Quantity, &it.UnitPrice, &it.Amount, &it.CrabCount, &it.SortNo); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		out = append(out, it)
@@ -495,7 +539,7 @@ func scanItems(rows *sql.Rows) ([]model.OrderItem, error) {
 	return out, rows.Err()
 }
 
-const itemColumns = `id, order_id, gender, spec_gram, spec_label, unit, quantity, unit_price, amount, sort_no`
+const itemColumns = `id, order_id, gender, spec_gram, spec_label, unit, quantity, unit_price, amount, crab_count, sort_no`
 
 func (q *queries) ListItemsByOrder(ctx context.Context, orderID int64) ([]model.OrderItem, error) {
 	rows, err := q.db.QueryContext(ctx,
@@ -536,102 +580,15 @@ func (q *queries) ListItemsByOrders(ctx context.Context, orderIDs []int64) (map[
 	return out, nil
 }
 
-// ---------- 收款流水 ----------
-
-const paymentColumns = `id, order_id, amount, pay_method, paid_at, remark, created_at, deleted_at`
-
-func scanPayment(sc rowScanner) (*model.Payment, error) {
-	var p model.Payment
-	var deleted sql.NullInt64
-	if err := sc.Scan(&p.ID, &p.OrderID, &p.Amount, &p.PayMethod, &p.PaidAt,
-		&p.Remark, &p.CreatedAt, &deleted); err != nil {
-		return nil, err
-	}
-	p.DeletedAt = toPtr(deleted)
-	return &p, nil
-}
-
-func (q *queries) InsertPayment(ctx context.Context, p *model.Payment) error {
-	res, err := q.db.ExecContext(ctx,
-		`INSERT INTO payments(order_id, amount, pay_method, paid_at, remark, created_at, deleted_at)
-		 VALUES(?,?,?,?,?,?,?)`,
-		p.OrderID, p.Amount, string(p.PayMethod), p.PaidAt, p.Remark, p.CreatedAt, nullInt(p.DeletedAt))
-	if err != nil {
-		return fmt.Errorf("insert payment: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("insert payment last id: %w", err)
-	}
-	p.ID = id
-	return nil
-}
-
-func (q *queries) GetPaymentByID(ctx context.Context, id int64) (*model.Payment, error) {
-	row := q.db.QueryRowContext(ctx,
-		`SELECT `+paymentColumns+` FROM payments WHERE id=? AND deleted_at IS NULL`, id)
-	p, err := scanPayment(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errs.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get payment: %w", err)
-	}
-	return p, nil
-}
-
-func (q *queries) ListPaymentsByOrder(ctx context.Context, orderID int64) ([]model.Payment, error) {
-	rows, err := q.db.QueryContext(ctx,
-		`SELECT `+paymentColumns+` FROM payments WHERE order_id=? AND deleted_at IS NULL
-		 ORDER BY paid_at, id`, orderID)
-	if err != nil {
-		return nil, fmt.Errorf("list payments: %w", err)
-	}
-	defer rows.Close()
-
-	var out []model.Payment
-	for rows.Next() {
-		p, err := scanPayment(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan payment: %w", err)
-		}
-		out = append(out, *p)
-	}
-	return out, rows.Err()
-}
-
-// SumPayments 汇总某订单未删除的收款流水金额，是 orders.paid_amount 的唯一来源。
-func (q *queries) SumPayments(ctx context.Context, orderID int64) (int64, error) {
-	var sum sql.NullInt64
-	err := q.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(amount),0) FROM payments WHERE order_id=? AND deleted_at IS NULL`,
-		orderID).Scan(&sum)
-	if err != nil {
-		return 0, fmt.Errorf("sum payments: %w", err)
-	}
-	return sum.Int64, nil
-}
-
-func (q *queries) SoftDeletePayment(ctx context.Context, id, now int64) error {
-	res, err := q.db.ExecContext(ctx,
-		`UPDATE payments SET deleted_at=? WHERE id=? AND deleted_at IS NULL`, now, id)
-	if err != nil {
-		return fmt.Errorf("soft delete payment: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return errs.ErrNotFound
-	}
-	return nil
-}
-
 // ---------- 操作流水 ----------
 
 func (q *queries) InsertLog(ctx context.Context, l *model.OrderLog) error {
 	res, err := q.db.ExecContext(ctx,
-		`INSERT INTO order_logs(order_id, action, field, from_value, to_value, operator, remark, created_at)
-		 VALUES(?,?,?,?,?,?,?,?)`,
-		l.OrderID, l.Action, l.Field, l.FromValue, l.ToValue, l.Operator, l.Remark, l.CreatedAt)
+		`INSERT INTO order_logs(order_id, action, field, from_value, to_value, operator, remark,
+			amount, pay_method, created_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		l.OrderID, l.Action, l.Field, l.FromValue, l.ToValue, l.Operator, l.Remark,
+		l.Amount, string(l.PayMethod), l.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("insert log: %w", err)
 	}
@@ -645,7 +602,8 @@ func (q *queries) InsertLog(ctx context.Context, l *model.OrderLog) error {
 
 func (q *queries) ListLogsByOrder(ctx context.Context, orderID int64) ([]model.OrderLog, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT id, order_id, action, field, from_value, to_value, operator, remark, created_at
+		`SELECT id, order_id, action, field, from_value, to_value, operator, remark,
+		        amount, pay_method, created_at
 		 FROM order_logs WHERE order_id=? ORDER BY created_at, id`, orderID)
 	if err != nil {
 		return nil, fmt.Errorf("list logs: %w", err)
@@ -656,7 +614,7 @@ func (q *queries) ListLogsByOrder(ctx context.Context, orderID int64) ([]model.O
 	for rows.Next() {
 		var l model.OrderLog
 		if err := rows.Scan(&l.ID, &l.OrderID, &l.Action, &l.Field, &l.FromValue,
-			&l.ToValue, &l.Operator, &l.Remark, &l.CreatedAt); err != nil {
+			&l.ToValue, &l.Operator, &l.Remark, &l.Amount, &l.PayMethod, &l.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan log: %w", err)
 		}
 		out = append(out, l)
