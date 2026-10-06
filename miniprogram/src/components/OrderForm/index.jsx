@@ -161,7 +161,8 @@ export default function OrderForm({ orderId, clipboardTick = 0 }) {
           spec_label: it.spec_label,
           unit: it.unit,
           quantity: it.quantity,
-          unit_price: it.unit_price
+          unit_price: it.unit_price,
+          pack_size: it.pack_size || 0
         })),
         freight_fee: yuanToFen(form.freight_fee),
         discount: yuanToFen(form.discount),

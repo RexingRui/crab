@@ -71,6 +71,7 @@ export default function SpecPicker({ visible, specs = [], onClose, onConfirm }) 
       unit: current.unit,
       unit_text: current.unit_text,
       unit_price: unitPrice,
+      pack_size: current.pack_size || 0,
       quantity,
       amount
     })

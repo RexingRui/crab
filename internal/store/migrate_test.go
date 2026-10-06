@@ -76,6 +76,57 @@ func TestMigrateAddsSourceToExistingDB(t *testing.T) {
 	}
 }
 
+// TestMigrateBackfillsCrabCount 老明细补 crab_count：按只=数量，按盒回价目表乘每盒只数，按斤=0。
+func TestMigrateBackfillsCrabCount(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "old.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+
+	for _, q := range []string{
+		oldOrdersDDL,
+		`CREATE TABLE order_items (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL,
+			gender TEXT NOT NULL, spec_gram INTEGER NOT NULL, spec_label TEXT NOT NULL,
+			unit TEXT NOT NULL DEFAULT 'piece', quantity INTEGER NOT NULL,
+			unit_price INTEGER NOT NULL, amount INTEGER NOT NULL, sort_no INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE specs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, gender TEXT NOT NULL, spec_gram INTEGER NOT NULL,
+			spec_label TEXT NOT NULL, unit TEXT NOT NULL DEFAULT 'piece', unit_price INTEGER NOT NULL,
+			pack_size INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+			sort_no INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
+		`INSERT INTO specs(gender, spec_gram, spec_label, unit, unit_price, pack_size, updated_at)
+		 VALUES('mixed', 1200, '8只装', 'box', 18900, 8, 1)`,
+		`INSERT INTO orders(order_no, receiver_name, phone, address, created_at, updated_at)
+		 VALUES('20260101-001','张三','13800138000','苏州市工业园区xx路 1 号',1,1)`,
+		`INSERT INTO order_items(order_id, gender, spec_gram, spec_label, unit, quantity, unit_price, amount, sort_no) VALUES
+		 (1,'mixed',1200,'8只装（公8母8）','box',2,18900,37800,0),
+		 (1,'mixed',1200,'8只装 散只（公2母3）','piece',5,2400,12000,1),
+		 (1,'male',500,'断脚蟹','jin',3,6000,18000,2),
+		 (1,'mixed',9999,'早就删掉的套餐','box',1,10000,10000,3)`,
+	} {
+		if _, err := st.DB().ExecContext(ctx, q); err != nil {
+			t.Fatalf("准备老库失败: %v\n%s", err, q)
+		}
+	}
+
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	items, err := st.ListItemsByOrder(ctx, 1)
+	if err != nil {
+		t.Fatalf("list items: %v", err)
+	}
+	want := []int{16, 5, 0, 0}
+	for i, it := range items {
+		if it.CrabCount != want[i] {
+			t.Errorf("%s: crab_count=%d，期望 %d", it.SpecLabel, it.CrabCount, want[i])
+		}
+	}
+}
+
 // TestMigrateFreshDBHasSource 新库直接由 schema.sql 建出来，也得有这一列。
 func TestMigrateFreshDBHasSource(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "fresh.db"))

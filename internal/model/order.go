@@ -80,6 +80,9 @@ type OrderItem struct {
 	Quantity  int
 	UnitPrice int64
 	Amount    int64 // = Quantity * UnitPrice
+	// CrabCount 这一行折合多少只：按只就是数量，按盒是盒数 × 每盒只数，按斤为 0。
+	// 存快照是因为价目表里的每盒只数日后可能改，历史订单的只数不能跟着变。
+	CrabCount int
 	SortNo    int
 }
 
@@ -167,6 +170,8 @@ type OrderFilter struct {
 type SpecStat struct {
 	Gender    Gender `json:"gender"`
 	SpecLabel string `json:"spec_label"`
+	Unit      Unit   `json:"unit"`
 	Quantity  int    `json:"quantity"`
+	CrabCount int    `json:"crab_count"`
 	Amount    int64  `json:"amount"`
 }

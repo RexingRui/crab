@@ -14,9 +14,18 @@ var schemaSQL string
 // addedColumns 是建表之后才加进来的列。schema.sql 里的 CREATE TABLE 带 IF NOT EXISTS，
 // 对已经建过表的库不会生效，所以增量列得单独补一次。
 // SQLite 没有 ADD COLUMN IF NOT EXISTS，只能先查 pragma_table_info 再决定加不加。
-var addedColumns = []struct{ table, column, ddl string }{
-	{"orders", "source", "ALTER TABLE orders ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"},
-	{"specs", "pack_size", "ALTER TABLE specs ADD COLUMN pack_size INTEGER NOT NULL DEFAULT 0"},
+// backfill 只在这一列刚加上时跑一次，给老数据补值。
+var addedColumns = []struct{ table, column, ddl, backfill string }{
+	{"orders", "source", "ALTER TABLE orders ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'", ""},
+	{"specs", "pack_size", "ALTER TABLE specs ADD COLUMN pack_size INTEGER NOT NULL DEFAULT 0", ""},
+	{"order_items", "crab_count", "ALTER TABLE order_items ADD COLUMN crab_count INTEGER NOT NULL DEFAULT 0",
+		// 老明细没记每盒几只，按「性别 + 克重 + 单位」回价目表找；找不到的盒按 0 只算。
+		`UPDATE order_items SET crab_count = CASE unit
+			WHEN 'piece' THEN quantity
+			WHEN 'box' THEN quantity * COALESCE((SELECT s.pack_size FROM specs s
+				WHERE s.gender = order_items.gender AND s.spec_gram = order_items.spec_gram
+				  AND s.unit = 'box'), 0)
+			ELSE 0 END`},
 }
 
 // Migrate 建表（全部语句都是 IF NOT EXISTS，可重复执行），再补增量列。
@@ -34,6 +43,11 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		}
 		if _, err := s.db.ExecContext(ctx, c.ddl); err != nil {
 			return fmt.Errorf("migrate add column %s.%s: %w", c.table, c.column, err)
+		}
+		if c.backfill != "" {
+			if _, err := s.db.ExecContext(ctx, c.backfill); err != nil {
+				return fmt.Errorf("migrate backfill %s.%s: %w", c.table, c.column, err)
+			}
 		}
 	}
 	return nil

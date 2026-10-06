@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS order_items (
     quantity    INTEGER NOT NULL,
     unit_price  INTEGER NOT NULL,                       -- 单价快照（分）
     amount      INTEGER NOT NULL,                       -- = quantity * unit_price
+    crab_count  INTEGER NOT NULL DEFAULT 0,             -- 折合只数：按只=数量，按盒=盒数×每盒只数，按斤=0
     sort_no     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id);

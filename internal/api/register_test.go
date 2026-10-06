@@ -565,3 +565,65 @@ func TestRegLinkRequiresLogin(t *testing.T) {
 		t.Fatalf("没登录也能签链接: status=%d code=%d", status, resp.Code)
 	}
 }
+
+// TestDashboardCountsCrabsNotBoxes 看板只数按蟹算：一盒按盒里的只数计，同一档不因公母比例拆行。
+func TestDashboardCountsCrabsNotBoxes(t *testing.T) {
+	e := newTestEnv(t)
+	sp := e.publicSpecIDs(t)[0]
+
+	a := registerBody(e.regLink(t, ""), sp.ID, 13, "13900139031")
+	a["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": 13, "male_count": 6}}
+	if status, resp, _ := e.register(t, a); resp.Code != errs.CodeOK {
+		t.Fatalf("登记失败: status=%d msg=%s", status, resp.Msg)
+	}
+	b := registerBody(e.regLink(t, ""), sp.ID, 8, "13900139032")
+	if status, resp, _ := e.register(t, b); resp.Code != errs.CodeOK {
+		t.Fatalf("登记失败: status=%d msg=%s", status, resp.Msg)
+	}
+	// 卖家录单只传规格不传每盒只数，后端回价目表补
+	manual := sampleOrderBody()
+	manual["items"] = []map[string]any{{
+		"gender": "mixed", "spec_gram": sp.SpecGram, "spec_label": sp.SpecLabel,
+		"unit": "box", "quantity": 1, "unit_price": sp.UnitPrice,
+	}}
+	o := decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", manual))
+	if o.Items[0].CrabCount != sp.PackSize || o.Items[0].PackSize != sp.PackSize {
+		t.Fatalf("录单的盒没折出只数: crab_count=%d pack_size=%d", o.Items[0].CrabCount, o.Items[0].PackSize)
+	}
+
+	var d struct {
+		Range struct {
+			CrabCount int `json:"crab_count"`
+			BySpec    []struct {
+				SpecLabel string `json:"spec_label"`
+				Unit      string `json:"unit"`
+				Quantity  int    `json:"quantity"`
+				CrabCount int    `json:"crab_count"`
+			} `json:"by_spec"`
+		} `json:"range"`
+	}
+	if err := json.Unmarshal(e.mustOK(t, http.MethodGet, "/api/stats/dashboard", nil), &d); err != nil {
+		t.Fatalf("解析看板失败: %v", err)
+	}
+	if want := 13 + 8 + sp.PackSize; d.Range.CrabCount != want {
+		t.Fatalf("看板只数 %d，期望 %d", d.Range.CrabCount, want)
+	}
+	if len(d.Range.BySpec) != 2 {
+		t.Fatalf("同一档该合成整盒、散只两行，实际 %+v", d.Range.BySpec)
+	}
+	for _, s := range d.Range.BySpec {
+		if strings.Contains(s.SpecLabel, "（公") {
+			t.Errorf("规格名里不该带公母比例: %s", s.SpecLabel)
+		}
+		switch s.Unit {
+		case "box":
+			if s.Quantity != 3 || s.CrabCount != 3*sp.PackSize {
+				t.Errorf("整盒行: %+v", s)
+			}
+		case "piece":
+			if s.Quantity != 5 || s.CrabCount != 5 {
+				t.Errorf("散只行: %+v", s)
+			}
+		}
+	}
+}

@@ -113,7 +113,7 @@ function dashboard() {
       order_count: live.length,
       payable_total: live.reduce((sum, o) => sum + o.payable_amount, 0),
       paid_total: live.reduce((sum, o) => sum + o.paid_amount, 0),
-      crab_count: live.reduce((sum, o) => sum + o.items.reduce((n, i) => n + i.quantity, 0), 0),
+      crab_count: live.reduce((sum, o) => sum + o.items.reduce((n, i) => n + (i.crab_count ?? i.quantity), 0), 0),
       by_spec: []
     }
   }

@@ -24,6 +24,9 @@ type ItemDTO struct {
 	UnitPriceYuan string `json:"unit_price_yuan"`
 	Amount        int64  `json:"amount"`
 	AmountYuan    string `json:"amount_yuan"`
+	CrabCount     int    `json:"crab_count"`
+	// PackSize 按盒的明细一盒几只（由只数快照反推），改单时原样回传即可。
+	PackSize int `json:"pack_size"`
 }
 
 type PaymentDTO struct {
@@ -230,6 +233,10 @@ func nilIfEmpty(s string) *string {
 }
 
 func toItemDTO(it model.OrderItem) ItemDTO {
+	pack := 0
+	if it.Unit == model.UnitBox && it.Quantity > 0 {
+		pack = it.CrabCount / it.Quantity
+	}
 	return ItemDTO{
 		ID:            it.ID,
 		Gender:        string(it.Gender),
@@ -243,6 +250,8 @@ func toItemDTO(it model.OrderItem) ItemDTO {
 		UnitPriceYuan: model.FormatYuan(it.UnitPrice),
 		Amount:        it.Amount,
 		AmountYuan:    model.FormatYuan(it.Amount),
+		CrabCount:     it.CrabCount,
+		PackSize:      pack,
 	}
 }
 

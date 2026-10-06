@@ -5,10 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 
 	"crab-order/internal/errs"
 	"crab-order/internal/model"
 )
+
+// ratioSuffix 明细快照末尾的公母比例，如「（公4母4）」。
+var ratioSuffix = regexp.MustCompile(`（公\d+母\d+）$`)
 
 // ---------- 规格价目表 ----------
 
@@ -234,7 +238,7 @@ func (q *queries) RangeSummary(ctx context.Context, start, end int64) (RangeSumm
 	}
 
 	err = q.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(i.quantity),0) FROM order_items i
+		`SELECT COALESCE(SUM(i.crab_count),0) FROM order_items i
 		 JOIN orders o ON o.id = i.order_id
 		 WHERE o.deleted_at IS NULL AND o.created_at >= ? AND o.created_at <= ?`,
 		start, end).Scan(&r.CrabCount)
@@ -245,12 +249,20 @@ func (q *queries) RangeSummary(ctx context.Context, start, end int64) (RangeSumm
 }
 
 // SpecStatsBetween 按规格聚合区间内的销量与金额。
+//
+// 按「性别 + 克重 + 单位」分组，不按 spec_label：快照里带着公母比例（「（公4母4）」），
+// 档名也可能改过，按名字分组同一档会被拆成好几行。名称优先用价目表里的现名，
+// 价目表里没有了就取快照里的一个，再去掉比例后缀。
 func (q *queries) SpecStatsBetween(ctx context.Context, start, end int64) ([]model.SpecStat, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT i.gender, i.spec_label, SUM(i.quantity), SUM(i.amount)
+		`SELECT i.gender, i.unit,
+		        COALESCE((SELECT s.spec_label FROM specs s
+		                  WHERE s.gender = i.gender AND s.spec_gram = i.spec_gram AND s.unit = i.unit
+		                  ORDER BY s.enabled DESC, s.id DESC LIMIT 1), MIN(i.spec_label)),
+		        SUM(i.quantity), SUM(i.crab_count), SUM(i.amount)
 		 FROM order_items i JOIN orders o ON o.id = i.order_id
 		 WHERE o.deleted_at IS NULL AND o.created_at >= ? AND o.created_at <= ?
-		 GROUP BY i.gender, i.spec_label
+		 GROUP BY i.gender, i.spec_gram, i.unit
 		 ORDER BY SUM(i.amount) DESC`, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("spec stats: %w", err)
@@ -260,9 +272,10 @@ func (q *queries) SpecStatsBetween(ctx context.Context, start, end int64) ([]mod
 	out := make([]model.SpecStat, 0, 8)
 	for rows.Next() {
 		var s model.SpecStat
-		if err := rows.Scan(&s.Gender, &s.SpecLabel, &s.Quantity, &s.Amount); err != nil {
+		if err := rows.Scan(&s.Gender, &s.Unit, &s.SpecLabel, &s.Quantity, &s.CrabCount, &s.Amount); err != nil {
 			return nil, fmt.Errorf("scan spec stat: %w", err)
 		}
+		s.SpecLabel = ratioSuffix.ReplaceAllString(s.SpecLabel, "")
 		out = append(out, s)
 	}
 	return out, rows.Err()

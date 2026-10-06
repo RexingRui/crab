@@ -470,11 +470,11 @@ func (q *queries) SoftDeleteOrder(ctx context.Context, id, now int64) error {
 
 func (q *queries) InsertItems(ctx context.Context, orderID int64, items []model.OrderItem) error {
 	const sqlStr = `INSERT INTO order_items(order_id, gender, spec_gram, spec_label, unit,
-		quantity, unit_price, amount, sort_no) VALUES(?,?,?,?,?,?,?,?,?)`
+		quantity, unit_price, amount, crab_count, sort_no) VALUES(?,?,?,?,?,?,?,?,?,?)`
 	for i := range items {
 		it := &items[i]
 		res, err := q.db.ExecContext(ctx, sqlStr, orderID, string(it.Gender), it.SpecGram,
-			it.SpecLabel, string(it.Unit), it.Quantity, it.UnitPrice, it.Amount, it.SortNo)
+			it.SpecLabel, string(it.Unit), it.Quantity, it.UnitPrice, it.Amount, it.CrabCount, it.SortNo)
 		if err != nil {
 			return fmt.Errorf("insert item: %w", err)
 		}
@@ -500,7 +500,7 @@ func scanItems(rows *sql.Rows) ([]model.OrderItem, error) {
 	for rows.Next() {
 		var it model.OrderItem
 		if err := rows.Scan(&it.ID, &it.OrderID, &it.Gender, &it.SpecGram, &it.SpecLabel,
-			&it.Unit, &it.Quantity, &it.UnitPrice, &it.Amount, &it.SortNo); err != nil {
+			&it.Unit, &it.Quantity, &it.UnitPrice, &it.Amount, &it.CrabCount, &it.SortNo); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		out = append(out, it)
@@ -508,7 +508,7 @@ func scanItems(rows *sql.Rows) ([]model.OrderItem, error) {
 	return out, rows.Err()
 }
 
-const itemColumns = `id, order_id, gender, spec_gram, spec_label, unit, quantity, unit_price, amount, sort_no`
+const itemColumns = `id, order_id, gender, spec_gram, spec_label, unit, quantity, unit_price, amount, crab_count, sort_no`
 
 func (q *queries) ListItemsByOrder(ctx context.Context, orderID int64) ([]model.OrderItem, error) {
 	rows, err := q.db.QueryContext(ctx,

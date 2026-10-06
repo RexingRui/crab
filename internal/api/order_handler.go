@@ -52,6 +52,8 @@ type itemReq struct {
 	Unit      model.Unit   `json:"unit"`
 	Quantity  int          `json:"quantity"`
 	UnitPrice int64        `json:"unit_price"`
+	// PackSize 按盒的明细一盒几只，可不传，后端会回价目表查。
+	PackSize int `json:"pack_size"`
 }
 
 func toItemInputs(in []itemReq) []service.ItemInput {
@@ -64,6 +66,7 @@ func toItemInputs(in []itemReq) []service.ItemInput {
 			Unit:      it.Unit,
 			Quantity:  it.Quantity,
 			UnitPrice: it.UnitPrice,
+			PackSize:  it.PackSize,
 		})
 	}
 	return out

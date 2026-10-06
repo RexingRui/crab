@@ -64,8 +64,8 @@ type ItemInput struct {
 	Unit      model.Unit
 	Quantity  int
 	UnitPrice int64
-	// PackSize 一盒几只，只用来数「这单一共多少只」，不落库——
-	// 明细存的是快照，盒里装什么已经写在 SpecLabel 里了。
+	// PackSize 一盒几只，只对按盒的明细有意义，用来折算 CrabCount。
+	// 录单时客户端可以不传，由 fillPackSizes 回价目表查。
 	PackSize int
 }
 
@@ -155,10 +155,63 @@ func buildItems(in []ItemInput) ([]model.OrderItem, error) {
 			Quantity:  it.Quantity,
 			UnitPrice: it.UnitPrice,
 			Amount:    CalcItemAmount(it.Quantity, it.UnitPrice),
+			CrabCount: itemCrabCount(unit, it.Quantity, it.PackSize),
 			SortNo:    i,
 		})
 	}
 	return out, nil
+}
+
+// itemCrabCount 一行明细折合多少只。按斤卖的折不出只数，记 0。
+func itemCrabCount(unit model.Unit, quantity, packSize int) int {
+	switch unit {
+	case model.UnitPiece:
+		return quantity
+	case model.UnitBox:
+		return quantity * packSize
+	}
+	return 0
+}
+
+// CountItemCrabs 整单一共多少只。
+func CountItemCrabs(items []model.OrderItem) int {
+	n := 0
+	for _, it := range items {
+		n += it.CrabCount
+	}
+	return n
+}
+
+// fillPackSizes 给没带每盒只数的按盒明细补上：按「性别 + 克重 + 单位」回价目表找。
+// 找不到（那一档已经删了）就留 0，这一行折不出只数，不拦着建单。
+func (s *OrderService) fillPackSizes(ctx context.Context, in []ItemInput) error {
+	need := false
+	for _, it := range in {
+		if it.Unit == model.UnitBox && it.PackSize <= 0 {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return nil
+	}
+	specs, err := s.st.ListSpecs(ctx, false)
+	if err != nil {
+		return errs.Internal(err)
+	}
+	for i := range in {
+		it := &in[i]
+		if it.Unit != model.UnitBox || it.PackSize > 0 {
+			continue
+		}
+		for _, sp := range specs {
+			if sp.Unit == model.UnitBox && sp.Gender == it.Gender && sp.SpecGram == it.SpecGram {
+				it.PackSize = sp.PackSize
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // validateMoney 校验运费、优惠，并返回货款与应收。
@@ -188,6 +241,9 @@ func validateExpectDate(d string) error {
 // CreateOrder 创建订单。返回的第二个值表示是否命中幂等（已存在同 request_id 的订单）。
 func (s *OrderService) CreateOrder(ctx context.Context, in CreateOrderInput) (*model.Order, bool, error) {
 	if err := validateReceiver(in.ReceiverName, in.Phone, in.Address); err != nil {
+		return nil, false, err
+	}
+	if err := s.fillPackSizes(ctx, in.Items); err != nil {
 		return nil, false, err
 	}
 	items, err := buildItems(in.Items)
@@ -370,6 +426,9 @@ func (s *OrderService) attachItems(ctx context.Context, list []*model.Order) err
 
 func (s *OrderService) UpdateOrder(ctx context.Context, in UpdateOrderInput) (*model.Order, error) {
 	if err := validateReceiver(in.ReceiverName, in.Phone, in.Address); err != nil {
+		return nil, err
+	}
+	if err := s.fillPackSizes(ctx, in.Items); err != nil {
 		return nil, err
 	}
 	items, err := buildItems(in.Items)
