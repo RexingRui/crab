@@ -1,5 +1,7 @@
 # 批量录单
 
+> 通常由 Claude 按 `.claude/skills/order-entry/SKILL.md` 的 SOP 从图片提取后调用本脚本。
+>
 > **仓库是公开的。** 真实订单（姓名、手机、地址）只放在本目录下的 CSV 里，
 > `.gitignore` 已忽略 `import/*.csv`（模板除外），**绝对不要 `git add -f`**。
 > token 只放环境变量，不写进任何文件。
