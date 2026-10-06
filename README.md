@@ -63,7 +63,7 @@ internal/timex/     业务时区与时间格式
 ## 几条不能破的规矩
 
 1. **金额只用整数「分」**。见到 `float64` 参与金额计算即为 bug。API 出入参也是分，响应里额外给 `*_yuan` 字符串方便展示。
-2. **`paid_amount` 与 `pay_status` 是派生值**，只能由 `recalcPayment` 写入，不接受客户端赋值。实收 = 该订单未删除收款流水之和；状态由实收与应收的大小关系推导。
+2. **`paid_amount` 与 `pay_status` 是派生值**，不接受客户端赋值。实收只能通过「记一笔收款」加减（同时写一条带金额的操作流水），状态由 `applyPayStatus` 按实收与应收的大小关系推导。没有单独的收款流水表，记错了就再记一笔负数冲掉。
 3. **`goods_amount` / `payable_amount` 由服务端算**，忽略客户端传入值。
 4. **发货状态与收款状态互不约束**。熟客先发后付、预售先付后发都是正常业务，没有「未付款不能发货」这种校验。
 5. **明细里的 `spec_label` / `unit_price` 是快照**，不关联 `specs` 表。改价只影响新订单，历史订单金额不跟着变（有测试守着）。
@@ -154,6 +154,10 @@ curl -X POST localhost:8080/api/orders \
   }'
 ```
 
+按盒的明细可以带 `pack_size`（一盒几只），不带就按「性别 + 克重 + 单位」回价目表查。
+每条明细存一个只数快照 `crab_count`（按只 = 数量，按盒 = 盒数 × 每盒只数，按斤 = 0），统计和运费分档都按它算。
+`freight_fee` 是买家承担的运费，一般在发货时按规则定，见下面「运费」。
+
 **列表 / 筛选**（全部可选，多条件 AND）
 
 ```bash
@@ -237,12 +241,54 @@ curl -X POST localhost:8080/api/orders/$ID/payments \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"amount":39000,"pay_method":"wechat","paid_at":null,"remark":"尾款"}'
 
-# 记错了就删（软删 + 重算）
-curl -X DELETE localhost:8080/api/payments/1 -H "Authorization: Bearer $TOKEN"
+# 记错了不删，再记一笔负数冲掉
+curl -X POST localhost:8080/api/orders/$ID/payments \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"amount":-39000,"remark":"尾款记错了"}'
 ```
 
 `pay_method` ∈ `wechat` / `alipay` / `cash` / `transfer` / `other`。
 允许超付，此时 `pay_status = paid`、`unpaid_amount` 为负数，前端显示「多收 X 元」。
+每一笔都记在操作流水里（`order_logs.amount` / `pay_method`），订单详情的 `payments` 就是从流水里挑出来的。
+
+**运费**
+
+这几个运费字段**只出现在卖家接口里**，买家查单和登记回执都看不到：
+
+| 字段 | 含义 |
+|---|---|
+| `freight_list` | 快递原价 |
+| `freight_cost` | 用券后的实付；`null` 表示还没填（`freight_pending: true`） |
+| `freight_basis` | 买家补多少按 `list`（原价）还是 `actual`（实付）算，每单自己选 |
+| `freight_fee` | **买家承担**的运费，计入应收 |
+| `freight_settled_at` | 和快递结清的时间，`null` 表示没结 |
+
+卖家承担 = 实付 − 买家承担（`freight_seller`）。
+
+```bash
+# 发货时顺手填运费（freight 整块可不传，之后再补）
+curl -X POST localhost:8080/api/orders/$ID/ship -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"ship_company":"顺丰","tracking_no":"SF1","freight":{"freight_list":7500,"freight_cost":6000}}'
+
+# 单独填 / 改运费；不传 freight_fee 就用规则算出的建议值，传了以卖家为准
+curl -X PUT localhost:8080/api/orders/$ID/freight -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"freight_list":7500,"freight_cost":6000,"freight_basis":"list","freight_fee":3000}'
+
+# 列表按运费筛：pending（没填）/ unsettled（没和快递结）/ settled
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/orders?freight=unsettled'
+
+# 批量标记已结；settled=false 为撤销
+curl -X POST localhost:8080/api/orders/freight-settle -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"ids":[1,2,3],"settled":true}'
+```
+
+**补贴规则写在代码里**（`internal/model/freight.go`），按只数分档，每档是「卖家最多补多少」，
+建议值 = max(0, 口径金额 − 该档卖家补贴)。当前 `v1`：8 只以内补 20 元，16 只以内补 40 元，再多补 60 元。
+规则带版本号，订单建单时记下当时的版本（`freight_rule_ver`），之后一直按这一版算。
+**改规则只影响之后新建的订单**：在 `freightRules` 里加一版新的（别改老版本），再把 `currentFreightRuleVer` 指过去。
+详情里的 `freight_seller_cap` 是按这单只数和规则版本算出的卖家补贴上限，前端用它现算建议值。
 
 **统计**
 
@@ -251,7 +297,7 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/stats/dashboard?start
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/stats/ship-plan?date=2026-09-16'
 ```
 
-口径：`today.revenue` 是当天**实际收到的钱**（按 `payments.paid_at` 计，含退款负数）；`range.*` 按订单**创建时间**落在区间内统计；`pending.unpaid_amount` 不含已取消的订单。`ship-plan` 的 `date` 默认明天。
+口径：`today.revenue` 是当天**实际收到的钱**（按收款流水的收款时间计，含退款负数）；`range.crab_count` 按蟹只数算（套餐按盒数 × 每盒只数，按斤的不计），`range.by_spec` 按「性别 + 克重 + 单位」分组；`freight.*` 是运费汇总（实付、买家承担、卖家承担、用券省下的、未结），区间同样按订单创建时间；`range.*` 按订单**创建时间**落在区间内统计；`pending.unpaid_amount` 不含已取消的订单。`ship-plan` 的 `date` 默认明天。
 
 **地址簿 / 价目表**
 
