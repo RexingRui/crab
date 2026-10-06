@@ -174,6 +174,7 @@ const orderColumns = `id, order_no, request_id, receiver_name, phone, address,
 	wechat_nick, wechat_remark, goods_amount, freight_fee, discount, payable_amount,
 	paid_amount, ship_status, pay_status, ship_company, tracking_no, expect_ship_date,
 	ship_time, receive_time, first_pay_time, settled_time, remark, source,
+	freight_list, freight_cost, freight_basis, freight_rule_ver, freight_settled_at,
 	created_at, updated_at, deleted_at`
 
 type rowScanner interface {
@@ -190,6 +191,9 @@ func scanOrder(sc rowScanner) (*model.Order, error) {
 		firstPay sql.NullInt64
 		settled  sql.NullInt64
 		deleted  sql.NullInt64
+		fList    sql.NullInt64
+		fCost    sql.NullInt64
+		fSettled sql.NullInt64
 	)
 	err := sc.Scan(
 		&o.ID, &o.OrderNo, &reqID, &o.ReceiverName, &o.Phone, &o.Address,
@@ -197,6 +201,7 @@ func scanOrder(sc rowScanner) (*model.Order, error) {
 		&o.PayableAmount, &o.PaidAmount, &o.ShipStatus, &o.PayStatus,
 		&o.ShipCompany, &o.TrackingNo, &expect,
 		&shipT, &recvT, &firstPay, &settled, &o.Remark, &o.Source,
+		&fList, &fCost, &o.FreightBasis, &o.FreightRuleVer, &fSettled,
 		&o.CreatedAt, &o.UpdatedAt, &deleted,
 	)
 	if err != nil {
@@ -212,7 +217,18 @@ func scanOrder(sc rowScanner) (*model.Order, error) {
 	o.FirstPayTime = toPtr(firstPay)
 	o.SettledTime = toPtr(settled)
 	o.DeletedAt = toPtr(deleted)
+	o.FreightList = toPtr(fList)
+	o.FreightCost = toPtr(fCost)
+	o.FreightSettledAt = toPtr(fSettled)
 	return &o, nil
+}
+
+// ruleVerOrDefault 漏传规则版本就记当前版。规则版本建单后不再改，UpdateOrder 不写这一列。
+func ruleVerOrDefault(v string) string {
+	if v == "" {
+		return model.CurrentFreightRuleVer()
+	}
+	return v
 }
 
 // sourceOrDefault 兜住零值：订单来源不写死在调用方，漏传就是卖家自己录的。
@@ -229,8 +245,9 @@ func (q *queries) InsertOrder(ctx context.Context, o *model.Order) error {
 		goods_amount, freight_fee, discount, payable_amount, paid_amount,
 		ship_status, pay_status, ship_company, tracking_no, expect_ship_date,
 		ship_time, receive_time, first_pay_time, settled_time, remark, source,
+		freight_list, freight_cost, freight_basis, freight_rule_ver, freight_settled_at,
 		created_at, updated_at, deleted_at)
-	VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 
 	res, err := q.db.ExecContext(ctx, sqlStr,
 		o.OrderNo, nullString(o.RequestID), o.ReceiverName, o.Phone, o.Address,
@@ -239,7 +256,10 @@ func (q *queries) InsertOrder(ctx context.Context, o *model.Order) error {
 		string(o.ShipStatus), string(o.PayStatus), o.ShipCompany, o.TrackingNo,
 		nullString(o.ExpectShipDate),
 		nullInt(o.ShipTime), nullInt(o.ReceiveTime), nullInt(o.FirstPayTime), nullInt(o.SettledTime),
-		o.Remark, string(sourceOrDefault(o.Source)), o.CreatedAt, o.UpdatedAt, nullInt(o.DeletedAt),
+		o.Remark, string(sourceOrDefault(o.Source)),
+		nullInt(o.FreightList), nullInt(o.FreightCost), string(o.FreightBasis), ruleVerOrDefault(o.FreightRuleVer),
+		nullInt(o.FreightSettledAt),
+		o.CreatedAt, o.UpdatedAt, nullInt(o.DeletedAt),
 	)
 	if err != nil {
 		if IsUniqueViolation(err) {
@@ -261,6 +281,7 @@ func (q *queries) UpdateOrder(ctx context.Context, o *model.Order, expectUpdated
 		goods_amount=?, freight_fee=?, discount=?, payable_amount=?, paid_amount=?,
 		ship_status=?, pay_status=?, ship_company=?, tracking_no=?, expect_ship_date=?,
 		ship_time=?, receive_time=?, first_pay_time=?, settled_time=?, remark=?,
+		freight_list=?, freight_cost=?, freight_basis=?, freight_settled_at=?,
 		updated_at=?, deleted_at=?
 	WHERE id=?`
 	args := []any{
@@ -269,7 +290,9 @@ func (q *queries) UpdateOrder(ctx context.Context, o *model.Order, expectUpdated
 		string(o.ShipStatus), string(o.PayStatus), o.ShipCompany, o.TrackingNo,
 		nullString(o.ExpectShipDate),
 		nullInt(o.ShipTime), nullInt(o.ReceiveTime), nullInt(o.FirstPayTime), nullInt(o.SettledTime),
-		o.Remark, o.UpdatedAt, nullInt(o.DeletedAt), o.ID,
+		o.Remark,
+		nullInt(o.FreightList), nullInt(o.FreightCost), string(o.FreightBasis), nullInt(o.FreightSettledAt),
+		o.UpdatedAt, nullInt(o.DeletedAt), o.ID,
 	}
 	if expectUpdatedAt > 0 {
 		sqlStr += ` AND updated_at=?`
@@ -369,6 +392,14 @@ func buildOrderFilter(f model.OrderFilter) (string, []any) {
 	if f.Source != "" {
 		where = append(where, "source = ?")
 		args = append(args, string(f.Source))
+	}
+	switch f.Freight {
+	case model.FreightFilterPending:
+		where = append(where, "freight_cost IS NULL AND ship_status != 'cancelled'")
+	case model.FreightFilterUnsettled:
+		where = append(where, "freight_cost IS NOT NULL AND freight_settled_at IS NULL")
+	case model.FreightFilterSettled:
+		where = append(where, "freight_settled_at IS NOT NULL")
 	}
 	if f.Keyword != "" {
 		p := likePattern(f.Keyword)

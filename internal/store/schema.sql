@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS orders (
     first_pay_time    INTEGER,                          -- 首次收款时间
     settled_time      INTEGER,                          -- 付清时间
 
+    -- 运费（只给卖家看；freight_fee 是买家承担的那部分）
+    freight_list      INTEGER,                          -- 快递原价（分）
+    freight_cost      INTEGER,                          -- 用券后的实付（分），NULL = 运费待定
+    freight_basis     TEXT    NOT NULL DEFAULT '',      -- 买家补多少按 list(原价) / actual(实付) 算
+    freight_rule_ver  TEXT    NOT NULL DEFAULT 'v1',    -- 建单时的补贴规则版本
+    freight_settled_at INTEGER,                         -- 和快递结清的时间
+
     remark            TEXT    NOT NULL DEFAULT '',
     source            TEXT    NOT NULL DEFAULT 'manual',  -- manual=卖家录入 / web=买家自助登记
     created_at        INTEGER NOT NULL,

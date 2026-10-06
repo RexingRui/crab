@@ -280,3 +280,28 @@ func (q *queries) SpecStatsBetween(ctx context.Context, start, end int64) ([]mod
 	}
 	return out, rows.Err()
 }
+
+func (q *queries) FreightSummary(ctx context.Context, start, end int64) (FreightSummary, error) {
+	var f FreightSummary
+	err := q.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(freight_list),0), COALESCE(SUM(freight_cost),0), COALESCE(SUM(freight_fee),0)
+		 FROM orders WHERE deleted_at IS NULL AND freight_cost IS NOT NULL
+		   AND created_at >= ? AND created_at <= ?`, start, end).
+		Scan(&f.RangeCount, &f.ListTotal, &f.CostTotal, &f.BuyerTotal)
+	if err != nil {
+		return f, fmt.Errorf("freight range: %w", err)
+	}
+	err = q.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(freight_cost),0), COALESCE(SUM(freight_list),0)
+		 FROM orders WHERE deleted_at IS NULL AND freight_cost IS NOT NULL AND freight_settled_at IS NULL`).
+		Scan(&f.UnsettledCount, &f.UnsettledCost, &f.UnsettledList)
+	if err != nil {
+		return f, fmt.Errorf("freight unsettled: %w", err)
+	}
+	f.ShippedPendingCount, err = q.countOrders(ctx,
+		`freight_cost IS NULL AND ship_status IN ('shipped','received')`)
+	if err != nil {
+		return f, fmt.Errorf("freight pending: %w", err)
+	}
+	return f, nil
+}

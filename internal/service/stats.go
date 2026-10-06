@@ -49,10 +49,33 @@ type RangeStat struct {
 	BySpec           []model.SpecStat `json:"by_spec"`
 }
 
+// FreightStat 运费汇总，只出现在卖家的看板里。卖家承担 = 实付 - 买家承担。
+type FreightStat struct {
+	RangeCount      int    `json:"range_count"`
+	ListTotal       int64  `json:"list_total"`
+	ListTotalYuan   string `json:"list_total_yuan"`
+	CostTotal       int64  `json:"cost_total"`
+	CostTotalYuan   string `json:"cost_total_yuan"`
+	BuyerTotal      int64  `json:"buyer_total"`
+	BuyerTotalYuan  string `json:"buyer_total_yuan"`
+	SellerTotal     int64  `json:"seller_total"`
+	SellerTotalYuan string `json:"seller_total_yuan"`
+	SavedTotal      int64  `json:"saved_total"` // 原价 - 实付，用券省下的
+	SavedTotalYuan  string `json:"saved_total_yuan"`
+
+	UnsettledCount      int    `json:"unsettled_count"`
+	UnsettledCost       int64  `json:"unsettled_cost"`
+	UnsettledCostYuan   string `json:"unsettled_cost_yuan"`
+	UnsettledList       int64  `json:"unsettled_list"`
+	UnsettledListYuan   string `json:"unsettled_list_yuan"`
+	ShippedPendingCount int    `json:"shipped_pending_count"`
+}
+
 type Dashboard struct {
 	Today   TodayStat   `json:"today"`
 	Pending PendingStat `json:"pending"`
 	Range   RangeStat   `json:"range"`
+	Freight FreightStat `json:"freight"`
 }
 
 // Dashboard 汇总看板数据。start/end 为空时默认取当天。
@@ -135,6 +158,30 @@ func (s *StatsService) Dashboard(ctx context.Context, start, end string) (*Dashb
 		PaidTotalYuan:    model.FormatYuan(rs.PaidTotal),
 		CrabCount:        rs.CrabCount,
 		BySpec:           bySpec,
+	}
+
+	fs, err := s.st.FreightSummary(ctx, rangeStart, rangeEnd)
+	if err != nil {
+		return nil, errs.Internal(err)
+	}
+	d.Freight = FreightStat{
+		RangeCount:          fs.RangeCount,
+		ListTotal:           fs.ListTotal,
+		ListTotalYuan:       model.FormatYuan(fs.ListTotal),
+		CostTotal:           fs.CostTotal,
+		CostTotalYuan:       model.FormatYuan(fs.CostTotal),
+		BuyerTotal:          fs.BuyerTotal,
+		BuyerTotalYuan:      model.FormatYuan(fs.BuyerTotal),
+		SellerTotal:         fs.CostTotal - fs.BuyerTotal,
+		SellerTotalYuan:     model.FormatYuan(fs.CostTotal - fs.BuyerTotal),
+		SavedTotal:          fs.ListTotal - fs.CostTotal,
+		SavedTotalYuan:      model.FormatYuan(fs.ListTotal - fs.CostTotal),
+		UnsettledCount:      fs.UnsettledCount,
+		UnsettledCost:       fs.UnsettledCost,
+		UnsettledCostYuan:   model.FormatYuan(fs.UnsettledCost),
+		UnsettledList:       fs.UnsettledList,
+		UnsettledListYuan:   model.FormatYuan(fs.UnsettledList),
+		ShippedPendingCount: fs.ShippedPendingCount,
 	}
 	return &d, nil
 }

@@ -26,6 +26,12 @@ var addedColumns = []struct{ table, column, ddl, backfill string }{
 				WHERE s.gender = order_items.gender AND s.spec_gram = order_items.spec_gram
 				  AND s.unit = 'box'), 0)
 			ELSE 0 END`},
+	{"orders", "freight_list", "ALTER TABLE orders ADD COLUMN freight_list INTEGER", ""},
+	{"orders", "freight_cost", "ALTER TABLE orders ADD COLUMN freight_cost INTEGER", ""},
+	{"orders", "freight_basis", "ALTER TABLE orders ADD COLUMN freight_basis TEXT NOT NULL DEFAULT ''", ""},
+	// 老单一律算第一版规则：上线这版规则之前没有别的规则
+	{"orders", "freight_rule_ver", "ALTER TABLE orders ADD COLUMN freight_rule_ver TEXT NOT NULL DEFAULT 'v1'", ""},
+	{"orders", "freight_settled_at", "ALTER TABLE orders ADD COLUMN freight_settled_at INTEGER", ""},
 	{"order_logs", "amount", "ALTER TABLE order_logs ADD COLUMN amount INTEGER NOT NULL DEFAULT 0", ""},
 	{"order_logs", "pay_method", "ALTER TABLE order_logs ADD COLUMN pay_method TEXT NOT NULL DEFAULT ''", ""},
 }

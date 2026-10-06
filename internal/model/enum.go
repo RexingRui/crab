@@ -206,6 +206,9 @@ const (
 	ActionCancel  = "cancel"
 	ActionDelete  = "delete"
 	ActionRevert  = "revert"
+	// ActionFreight 填 / 改运费；ActionFreightSettle 标记和快递结清（或撤销）。
+	ActionFreight       = "freight"
+	ActionFreightSettle = "freight_settle"
 )
 
 // ========== 订单来源 ==========

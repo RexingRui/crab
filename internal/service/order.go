@@ -173,15 +173,6 @@ func itemCrabCount(unit model.Unit, quantity, packSize int) int {
 	return 0
 }
 
-// CountItemCrabs 整单一共多少只。
-func CountItemCrabs(items []model.OrderItem) int {
-	n := 0
-	for _, it := range items {
-		n += it.CrabCount
-	}
-	return n
-}
-
 // fillPackSizes 给没带每盒只数的按盒明细补上：按「性别 + 克重 + 单位」回价目表找。
 // 找不到（那一档已经删了）就留 0，这一行折不出只数，不拦着建单。
 func (s *OrderService) fillPackSizes(ctx context.Context, in []ItemInput) error {
@@ -293,6 +284,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, in CreateOrderInput) (*m
 		ExpectShipDate: in.ExpectShipDate,
 		Remark:         in.Remark,
 		Source:         in.Source,
+		FreightRuleVer: model.CurrentFreightRuleVer(),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 		Items:          items,
@@ -527,7 +519,17 @@ func diffOrder(old, cur *model.Order) []*model.OrderLog {
 	add("goods_amount", strconv.FormatInt(old.GoodsAmount, 10), strconv.FormatInt(cur.GoodsAmount, 10))
 	add("payable_amount", strconv.FormatInt(old.PayableAmount, 10), strconv.FormatInt(cur.PayableAmount, 10))
 	add("pay_status", string(old.PayStatus), string(cur.PayStatus))
+	add("freight_list", fmtPtr(old.FreightList), fmtPtr(cur.FreightList))
+	add("freight_cost", fmtPtr(old.FreightCost), fmtPtr(cur.FreightCost))
+	add("freight_basis", string(old.FreightBasis), string(cur.FreightBasis))
 	return logs
+}
+
+func fmtPtr(p *int64) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.FormatInt(*p, 10)
 }
 
 // ========== 状态流转 ==========
@@ -537,7 +539,9 @@ type ShipInput struct {
 	ShipCompany string
 	TrackingNo  string
 	ShipTime    *int64
-	Operator    string
+	// Freight 发货时顺手填的运费，nil 表示这次不填（之后再补）。
+	Freight  *FreightInput
+	Operator string
 }
 
 func (s *OrderService) Ship(ctx context.Context, in ShipInput) (*model.Order, error) {
@@ -554,11 +558,24 @@ func (s *OrderService) Ship(ctx context.Context, in ShipInput) (*model.Order, er
 	}
 
 	return s.transit(ctx, in.ID, model.ShipShipped, model.ActionShip, in.Operator, "", now,
-		func(o *model.Order) error {
+		func(q store.Queries, o *model.Order) error {
 			o.ShipCompany = in.ShipCompany
 			o.TrackingNo = in.TrackingNo
 			o.ShipTime = &shipTime
-			return nil
+			if in.Freight == nil {
+				return nil
+			}
+			items, err := q.ListItemsByOrder(ctx, o.ID)
+			if err != nil {
+				return errs.Internal(err)
+			}
+			o.Items = items
+			old := *o
+			if err := applyFreight(o, *in.Freight); err != nil {
+				return err
+			}
+			applyPayStatus(o, now, now)
+			return logDiff(ctx, q, &old, o, model.ActionFreight, in.Operator, now)
 		})
 }
 
@@ -576,7 +593,7 @@ func (s *OrderService) Receive(ctx context.Context, in ReceiveInput) (*model.Ord
 	}
 
 	return s.transit(ctx, in.ID, model.ShipReceived, model.ActionReceive, in.Operator, "", now,
-		func(o *model.Order) error {
+		func(_ store.Queries, o *model.Order) error {
 			if o.ShipTime == nil {
 				return errs.StateConflict("订单缺少发货时间，无法确认收货")
 			}
@@ -604,7 +621,7 @@ func (s *OrderService) transit(
 	to model.ShipStatus,
 	action, operator, remark string,
 	now int64,
-	apply func(o *model.Order) error,
+	apply func(q store.Queries, o *model.Order) error,
 ) (*model.Order, error) {
 	var result *model.Order
 	err := s.st.WithTx(ctx, func(q store.Queries) error {
@@ -617,7 +634,7 @@ func (s *OrderService) transit(
 			return errs.StateConflict("发货状态不允许从 %s 变为 %s", from, to)
 		}
 		if apply != nil {
-			if err := apply(o); err != nil {
+			if err := apply(q, o); err != nil {
 				return err
 			}
 		}
@@ -875,4 +892,185 @@ func mapNotFound(err error, what string) error {
 		return e
 	}
 	return errs.Internal(err)
+}
+
+// ========== 运费 ==========
+
+// FreightInput 卖家填的运费。FreightCost 必填；按原价算时 FreightList 也必填。
+type FreightInput struct {
+	FreightList *int64
+	FreightCost *int64
+	// Basis 空串表示用这单规则的默认口径。
+	Basis model.FreightBasis
+	// BuyerFee 卖家确认的买家承担金额；nil 表示直接用规则算出的建议值。
+	BuyerFee *int64
+}
+
+// applyFreight 把运费写进订单，并重算买家承担部分与应收。调用方负责随后的 applyPayStatus。
+// 订单必须已装载明细：建议值按这单的只数和建单时的规则版本算。
+func applyFreight(o *model.Order, in FreightInput) error {
+	if in.FreightCost == nil {
+		return errs.InvalidParam("freight_cost 必填")
+	}
+	if *in.FreightCost < 0 || (in.FreightList != nil && *in.FreightList < 0) {
+		return errs.InvalidParam("运费不能为负")
+	}
+	rule := model.FreightRuleOf(o.FreightRuleVer)
+	basis := in.Basis
+	if basis == "" {
+		basis = rule.DefaultBasis
+	}
+	if !basis.Valid() {
+		return errs.InvalidParam("freight_basis 非法，应为 list/actual")
+	}
+	basisAmount := *in.FreightCost
+	if basis == model.FreightBasisList {
+		if in.FreightList == nil {
+			return errs.InvalidParam("按原价算，需要填快递原价")
+		}
+		basisAmount = *in.FreightList
+	}
+
+	buyer := rule.SuggestBuyerFee(basisAmount, o.CrabCount())
+	if in.BuyerFee != nil {
+		buyer = *in.BuyerFee
+	}
+	if buyer < 0 {
+		return errs.InvalidParam("买家承担的运费不能为负")
+	}
+	if buyer > basisAmount {
+		what := "实付"
+		if basis == model.FreightBasisList {
+			what = "原价"
+		}
+		return errs.InvalidParam("买家承担的运费不能超过快递%s", what)
+	}
+
+	_, payable, err := validateMoney(o.Items, buyer, o.Discount)
+	if err != nil {
+		return err
+	}
+	list, cost := *in.FreightCost, *in.FreightCost
+	if in.FreightList != nil {
+		list = *in.FreightList
+	}
+	o.FreightList = &list
+	o.FreightCost = &cost
+	o.FreightBasis = basis
+	o.FreightFee = buyer
+	o.PayableAmount = payable
+	return nil
+}
+
+type SetFreightInput struct {
+	ID int64
+	FreightInput
+	Operator string
+}
+
+// SetFreight 填或改一单的运费。发货前后都能改（比如重量复核后加价），已取消的单不行。
+func (s *OrderService) SetFreight(ctx context.Context, in SetFreightInput) (*model.Order, error) {
+	now := s.now()
+	var result *model.Order
+	err := s.st.WithTx(ctx, func(q store.Queries) error {
+		o, err := q.GetOrderByID(ctx, in.ID)
+		if err != nil {
+			return mapNotFound(err, "订单")
+		}
+		if o.ShipStatus == model.ShipCancelled {
+			return errs.StateConflict("订单已取消，不能再填运费")
+		}
+		if o.Items, err = q.ListItemsByOrder(ctx, o.ID); err != nil {
+			return errs.Internal(err)
+		}
+		old := *o
+		if err := applyFreight(o, in.FreightInput); err != nil {
+			return err
+		}
+		applyPayStatus(o, now, now)
+		if err := q.UpdateOrder(ctx, o, 0); err != nil {
+			return errs.Internal(err)
+		}
+		if err := logDiff(ctx, q, &old, o, model.ActionFreight, in.Operator, now); err != nil {
+			return err
+		}
+		result = o
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.loadDetail(ctx, s.st, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// logDiff 把两版订单的差异逐字段写进操作流水。
+func logDiff(ctx context.Context, q store.Queries, old, cur *model.Order, action, operator string, now int64) error {
+	for _, d := range diffOrder(old, cur) {
+		d.OrderID = cur.ID
+		d.Action = action
+		d.Operator = operator
+		d.CreatedAt = now
+		if err := q.InsertLog(ctx, d); err != nil {
+			return errs.Internal(err)
+		}
+	}
+	return nil
+}
+
+// SettleFreight 批量标记这些单的运费已和快递结清（settled=false 为撤销）。
+// 还没填运费的单不能标记已结，整批拒绝，免得漏看。
+func (s *OrderService) SettleFreight(ctx context.Context, ids []int64, settled bool, operator string) (int, error) {
+	if len(ids) == 0 {
+		return 0, errs.InvalidParam("ids 至少一个")
+	}
+	if len(ids) > 200 {
+		return 0, errs.InvalidParam("一次最多 200 单")
+	}
+	now := s.now()
+	changed := 0
+	err := s.st.WithTx(ctx, func(q store.Queries) error {
+		for _, id := range ids {
+			o, err := q.GetOrderByID(ctx, id)
+			if err != nil {
+				return mapNotFound(err, "订单")
+			}
+			if settled && o.FreightCost == nil {
+				return errs.StateConflict("单号 %s 还没填运费，不能标记已结", o.OrderNo)
+			}
+			if (o.FreightSettledAt != nil) == settled {
+				continue
+			}
+			from := fmtPtr(o.FreightSettledAt)
+			if settled {
+				t := now
+				o.FreightSettledAt = &t
+			} else {
+				o.FreightSettledAt = nil
+			}
+			o.UpdatedAt = now
+			if err := q.UpdateOrder(ctx, o, 0); err != nil {
+				return errs.Internal(err)
+			}
+			if err := q.InsertLog(ctx, &model.OrderLog{
+				OrderID:   o.ID,
+				Action:    model.ActionFreightSettle,
+				Field:     "freight_settled_at",
+				FromValue: from,
+				ToValue:   fmtPtr(o.FreightSettledAt),
+				Operator:  operator,
+				CreatedAt: now,
+			}); err != nil {
+				return errs.Internal(err)
+			}
+			changed++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return changed, nil
 }

@@ -64,6 +64,24 @@ type Queries interface {
 	UnpaidSummary(ctx context.Context) (count int, amount int64, err error)
 	RangeSummary(ctx context.Context, start, end int64) (RangeSummary, error)
 	SpecStatsBetween(ctx context.Context, start, end int64) ([]model.SpecStat, error)
+	FreightSummary(ctx context.Context, start, end int64) (FreightSummary, error)
+}
+
+// FreightSummary 运费汇总，只给卖家看。
+type FreightSummary struct {
+	// 区间内（按建单时间）已填运费的单
+	RangeCount int
+	ListTotal  int64 // 原价合计
+	CostTotal  int64 // 实付合计
+	BuyerTotal int64 // 买家承担合计
+
+	// 不分区间：填了运费还没和快递结的单
+	UnsettledCount int
+	UnsettledCost  int64
+	UnsettledList  int64
+
+	// 不分区间：已经发出去了、运费还没填的单
+	ShippedPendingCount int
 }
 
 // RangeSummary 区间统计结果。
