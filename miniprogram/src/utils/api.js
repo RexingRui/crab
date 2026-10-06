@@ -28,6 +28,11 @@ export const api = {
   // to 只能是 pending / shipped，reason 必填
   revertShip: (id, to, reason) => post(`/api/orders/${id}/revert-ship`, { to, reason }),
 
+  // 运费：body 为 { freight_list, freight_cost, freight_basis, freight_fee }，金额都是分
+  setFreight: (id, body) => put(`/api/orders/${id}/freight`, body),
+  // 批量标记和快递结清；settled=false 为撤销
+  settleFreight: (ids, settled = true) => post('/api/orders/freight-settle', { ids, settled }),
+
   // 收款
   addPayment: (id, body) => post(`/api/orders/${id}/payments`, body),
 

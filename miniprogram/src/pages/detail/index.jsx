@@ -5,6 +5,7 @@ import DemoBanner from '../../components/DemoBanner'
 import StatusTag from '../../components/StatusTag'
 import ShipSheet from '../../components/ShipSheet'
 import PaymentSheet from '../../components/PaymentSheet'
+import FreightSheet from '../../components/FreightSheet'
 import api from '../../utils/api'
 import { fenToYuan, formatDate, maskPhone, overdueDays, itemName } from '../../utils/format'
 import { getTrackUrl, whenReady } from '../../utils/session'
@@ -18,6 +19,7 @@ export default function Detail() {
   const [order, setOrder] = useState(null)
   const [shipOpen, setShipOpen] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
+  const [freightOpen, setFreightOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [logsOpen, setLogsOpen] = useState(false)
   const [flash, setFlash] = useState(false)
@@ -72,6 +74,29 @@ export default function Detail() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  async function doFreight(payload) {
+    if (guardDemo(toast)) return
+    setSubmitting(true)
+    try {
+      await api.setFreight(order.id, payload)
+      setFreightOpen(false)
+      await afterChange('运费记上了')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function toggleSettled() {
+    if (guardDemo(toast)) return
+    const settled = !order.freight_settled_at
+    if (!settled) {
+      const { confirm } = await Taro.showModal({ title: '撤销结算？', content: '这单的运费改回「未结」' })
+      if (!confirm) return
+    }
+    await api.settleFreight([order.id], settled)
+    await afterChange(settled ? '标记已结' : '改回未结')
   }
 
   async function doReceive() {
@@ -213,7 +238,7 @@ export default function Detail() {
         <View className='divider' />
 
         <View className='detail__sum'>
-          {order.freight_fee ? <SumLine label='运费' value={`+${fenToYuan(order.freight_fee)}`} /> : null}
+          {order.freight_fee ? <SumLine label='买家付运费' value={`+${fenToYuan(order.freight_fee)}`} /> : null}
           {order.discount ? <SumLine label='优惠' value={`−${fenToYuan(order.discount)}`} /> : null}
           <View className='detail__total'>
             <Text className='group-title'>应收</Text>
@@ -226,6 +251,9 @@ export default function Detail() {
             ) : order.unpaid_amount < 0 ? (
               // 后端允许超付，多出来的部分要说清楚，不能显示成「还差 -50」
               <Text className='detail__over num'>多收 {fenToYuan(-order.unpaid_amount)}</Text>
+            ) : order.freight_pending ? (
+              // 货款收齐了，但运费还没填，买家可能还要补
+              <Text className='detail__rest num'>货款已收清 · 运费待定</Text>
             ) : (
               <Text className='sub'>已收清</Text>
             )}
@@ -242,6 +270,39 @@ export default function Detail() {
             <Text className='detail__link' onClick={() => copy(order.tracking_no, '运单号复制好了')}>复制</Text>
           </View>
           {order.ship_time ? <Text className='sub'>{formatDate(order.ship_time, 'M月D日 HH:mm')} 发出</Text> : null}
+        </View>
+      ) : null}
+
+      {order.ship_status !== 'cancelled' ? (
+        <View className='section card'>
+          <View className='row detail__freight-head'>
+            <Text className='group-title'>运费</Text>
+            <Text className='detail__link' onClick={() => setFreightOpen(true)}>
+              {order.freight_pending ? '填运费' : '改运费'}
+            </Text>
+          </View>
+          {order.freight_pending ? (
+            <Text className='sub detail__freight-empty'>
+              还没填。这单 {order.crab_count} 只，卖家最多补 {fenToYuan(order.freight_seller_cap)}。
+            </Text>
+          ) : (
+            <View className='detail__sum'>
+              {order.freight_list != null && order.freight_list !== order.freight_cost ? (
+                <SumLine label='快递原价' value={fenToYuan(order.freight_list)} />
+              ) : null}
+              <SumLine label='用券后实付' value={fenToYuan(order.freight_cost)} />
+              <SumLine label={`买家补（${order.freight_basis_text}）`} value={fenToYuan(order.freight_fee)} />
+              <SumLine label='你实际担' value={fenToYuan(order.freight_seller)} />
+              <View className='row detail__freight-settle'>
+                <Text className='sub'>
+                  {order.freight_settled_at ? `已和快递结清 · ${formatDate(order.freight_settled_at, 'M/D')}` : '还没和快递结'}
+                </Text>
+                <Text className='detail__link' onClick={toggleSettled}>
+                  {order.freight_settled_at ? '撤销' : '标记已结'}
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
       ) : null}
 
@@ -294,6 +355,14 @@ export default function Detail() {
           <View className='btn btn--primary btn--sm' onClick={doReceive}>确认收货</View>
         ) : null}
       </View>
+
+      <FreightSheet
+        visible={freightOpen}
+        order={order}
+        submitting={submitting}
+        onClose={() => setFreightOpen(false)}
+        onSubmit={doFreight}
+      />
 
       <ShipSheet
         visible={shipOpen}

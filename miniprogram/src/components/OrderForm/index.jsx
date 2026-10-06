@@ -275,12 +275,13 @@ export default function OrderForm({ orderId, clipboardTick = 0 }) {
       <View className='section card'>
         <View className='record__pair'>
           <View className='record__pair-cell'>
-            <Text className='sub'>运费</Text>
+            {/* 只是买家要付的那部分；快递原价和实付在发货 / 详情页的「运费」里填，会按规则算出这里的建议值 */}
+            <Text className='sub'>买家付运费</Text>
             <Input
               className='record__pair-input num'
               type='digit'
               value={form.freight_fee}
-              placeholder='0'
+              placeholder='发货时再定'
               onInput={(e) => update('freight_fee', e.detail.value)}
             />
           </View>

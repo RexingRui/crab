@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import { View, Text, Input } from '@tarojs/components'
 import Sheet from '../Sheet'
+import FreightFields from '../FreightFields'
 import './index.scss'
 
 const COMPANIES = ['顺丰速运', '京东物流', '中通快递', '圆通速递', '韵达快递', '德邦快递']
 
-/** 发货抽屉：填快递公司 + 运单号，首页卡片和详情页共用 */
+/** 发货抽屉：填快递公司 + 运单号，运费知道了就顺手填。首页卡片和详情页共用 */
 export default function ShipSheet({ visible, order, submitting, onClose, onSubmit }) {
   const [company, setCompany] = useState(COMPANIES[0])
   const [trackingNo, setTrackingNo] = useState('')
+  const [freight, setFreight] = useState({ empty: true, problem: '', payload: null })
 
   useEffect(() => {
     if (!visible) return
@@ -16,7 +18,13 @@ export default function ShipSheet({ visible, order, submitting, onClose, onSubmi
     setTrackingNo((order && order.tracking_no) || '')
   }, [visible, order])
 
-  const ready = Boolean(company && trackingNo.trim())
+  const ready = Boolean(company && trackingNo.trim()) && !freight.problem
+
+  function submit() {
+    const body = { ship_company: company, tracking_no: trackingNo.trim() }
+    if (!freight.empty) body.freight = freight.payload
+    onSubmit(body)
+  }
 
   return (
     <Sheet
@@ -26,7 +34,7 @@ export default function ShipSheet({ visible, order, submitting, onClose, onSubmi
       footer={
         <View
           className={`btn btn--primary btn--block ${ready && !submitting ? '' : 'btn--off'}`}
-          onClick={ready && !submitting ? () => onSubmit({ ship_company: company, tracking_no: trackingNo.trim() }) : undefined}
+          onClick={ready && !submitting ? submit : undefined}
         >
           {submitting ? '提交中' : '确认发货'}
         </View>
@@ -52,6 +60,12 @@ export default function ShipSheet({ visible, order, submitting, onClose, onSubmi
         placeholder='粘贴或输入运单号'
         onInput={(e) => setTrackingNo(e.detail.value)}
       />
+
+      <Text className='group-title ship-sheet__gap'>运费</Text>
+      <Text className='sub'>知道了就顺手填，不知道可以先空着，发完再补。</Text>
+      <View className='ship-sheet__freight'>
+        <FreightFields order={order} visible={visible} optional onChange={setFreight} />
+      </View>
     </Sheet>
   )
 }

@@ -21,6 +21,9 @@ export default function OrderCard({ order, onClick, onShip, showShipButton }) {
           {order.source === 'web' ? (
             <Text className='order-card__src'>买家登记</Text>
           ) : null}
+          {order.freight_pending && order.ship_status !== 'pending' ? (
+            <Text className='order-card__src'>运费待填</Text>
+          ) : null}
         </View>
         <View className='order-card__tags'>
           {overdue > 0 ? (

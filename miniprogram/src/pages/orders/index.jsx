@@ -6,17 +6,22 @@ import OrderCard from '../../components/OrderCard'
 import Empty from '../../components/Empty'
 import Sheet from '../../components/Sheet'
 import api from '../../utils/api'
-import { friendlyDay, formatDate } from '../../utils/format'
+import { friendlyDay, formatDate, fenToYuan } from '../../utils/format'
 import { whenReady } from '../../utils/session'
+import { guardDemo } from '../../hooks/useDemoMode'
+import { toast } from '../../utils/request'
 import './index.scss'
 
 const PAGE_SIZE = 20
+// 对账时要一次看全，未结运费那一栏一页拉到后端允许的上限
+const SETTLE_PAGE_SIZE = 100
 
 // 快捷筛选 chip，可多选（发货状态与收款状态各取一个）
 const CHIPS = [
   { key: 'pending', field: 'ship_status', value: 'pending', label: '待发货' },
   { key: 'unpaid', field: 'pay_status', value: 'unpaid', label: '未收款' },
-  { key: 'shipped', field: 'ship_status', value: 'shipped', label: '已发货' }
+  { key: 'shipped', field: 'ship_status', value: 'shipped', label: '已发货' },
+  { key: 'unsettled', field: 'freight', value: 'unsettled', label: '运费未结' }
 ]
 
 const SHIP_OPTIONS = [
@@ -28,8 +33,11 @@ const PAY_OPTIONS = [
 const SOURCE_OPTIONS = [
   ['', '不限'], ['web', '买家登记'], ['manual', '自己录的']
 ]
+const FREIGHT_OPTIONS = [
+  ['', '不限'], ['pending', '还没填'], ['unsettled', '没和快递结'], ['settled', '已结']
+]
 
-const EMPTY_FILTERS = { ship_status: '', pay_status: '', source: '' }
+const EMPTY_FILTERS = { ship_status: '', pay_status: '', source: '', freight: '' }
 
 export default function Orders() {
   const [keyword, setKeyword] = useState('')
@@ -52,7 +60,8 @@ export default function Orders() {
       setFilters({
         ship_status: params.ship_status || '',
         pay_status: params.pay_status || '',
-        source: params.source || ''
+        source: params.source || '',
+        freight: params.freight || ''
       })
     }
     Taro.eventCenter.on('orders:filter', apply)
@@ -69,7 +78,8 @@ export default function Orders() {
     setLoading(true)
     try {
       await whenReady()
-      const res = await api.orders({ ...query, page: targetPage, page_size: PAGE_SIZE })
+      const size = query.freight === 'unsettled' ? SETTLE_PAGE_SIZE : PAGE_SIZE
+      const res = await api.orders({ ...query, page: targetPage, page_size: size })
       if (seq !== requestSeq.current) return // 慢响应盖掉新结果
       const rows = (res && res.list) || []
       setTotal((res && res.total) || 0)
@@ -109,7 +119,31 @@ export default function Orders() {
     }))
   }
 
-  const isAll = !filters.ship_status && !filters.pay_status && !filters.source
+  const isAll = !filters.ship_status && !filters.pay_status && !filters.source && !filters.freight
+
+  // 未结运费：按已加载的单算合计，拿去和快递账单对
+  const unsettled = useMemo(() => {
+    if (filters.freight !== 'unsettled') return null
+    return list.reduce((acc, o) => ({
+      cost: acc.cost + (o.freight_cost || 0),
+      list: acc.list + (o.freight_list || o.freight_cost || 0)
+    }), { cost: 0, list: 0 })
+  }, [filters.freight, list])
+
+  async function settleAll() {
+    if (guardDemo(toast)) return
+    const ids = list.map((o) => o.id)
+    if (!ids.length) return
+    const more = list.length < total ? `（还有 ${total - list.length} 单没加载，这次不动）` : ''
+    const { confirm } = await Taro.showModal({
+      title: `标记 ${ids.length} 单已结？`,
+      content: `实付合计 ${fenToYuan(unsettled.cost)}${more}`
+    })
+    if (!confirm) return
+    await api.settleFreight(ids, true)
+    Taro.showToast({ title: '标记好了', icon: 'success' })
+    load(1)
+  }
 
   // 按创建日期分组，组标题吸顶
   const groups = useMemo(() => {
@@ -164,6 +198,18 @@ export default function Orders() {
           全部
         </Text>
       </View>
+
+      {unsettled && list.length > 0 ? (
+        <View className='card orders__settle'>
+          <View>
+            <Text className='group-title'>{list.length} 单没和快递结</Text>
+            <Text className='sub orders__settle-sum'>
+              实付 {fenToYuan(unsettled.cost)} · 原价 {fenToYuan(unsettled.list)}
+            </Text>
+          </View>
+          <View className='btn btn--primary btn--sm' onClick={settleAll}>全部标记已结</View>
+        </View>
+      ) : null}
 
       {groups.length === 0 && !loading ? (
         <Empty text={keyword || !isAll ? '这些条件下没有记录。' : '还什么都没记。'}>
@@ -228,6 +274,12 @@ export default function Orders() {
           options={SOURCE_OPTIONS}
           value={draft.source}
           onPick={(v) => setDraft((d) => ({ ...d, source: v }))}
+        />
+        <OptionRow
+          title='运费'
+          options={FREIGHT_OPTIONS}
+          value={draft.freight}
+          onPick={(v) => setDraft((d) => ({ ...d, freight: v }))}
         />
       </Sheet>
     </View>
