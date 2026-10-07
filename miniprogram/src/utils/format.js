@@ -130,12 +130,54 @@ export function maskName(name) {
   return s ? s[0] + '*'.repeat(Math.max(s.length - 1, 1)) : '';
 }
 
-/* 明细行的显示名。套餐（mixed）不加「公母」前缀：一盒里公母都有，
- * 前缀说不出任何东西，而档名本来就写着盒里装的是什么。
- * 和后端 model.Order.ItemsSummary 的规矩保持一致。 */
+/* 明细 / 规格的显示名：「母 3两」「公 4两(残)」。后端给了 title 就用它，
+ * 和后端 model.OrderItem.Title 的规矩保持一致；改版前的混装老明细不加性别前缀。 */
 export function itemName(item) {
   if (!item) return '';
+  if (item.title) return item.title;
   const label = item.spec_label || '';
-  if (item.gender === 'mixed') return label;
-  return `${item.gender_text || ''} ${label}`.trim();
+  const broken = item.grade === 'broken' ? '(残)' : '';
+  if (item.gender === 'mixed') return label + broken;
+  return `${item.gender_text || ''}${label}${broken}`.trim();
+}
+
+/* ---------- 按只计价 ---------- */
+
+/* 页面上报价用的「一盒」：写成「8 只 ¥189」。只是展示口径，数据里没有盒。 */
+export const PACK_HINT = 8;
+
+/* 单只价精确到「厘」（0.001 元）：189 元 8 只 = 23.625 元/只，只有到厘才能算回 189。
+ * 厘 → 元字符串，至少两位小数，第三位是 0 就省掉："23.625" / "35.00"。
+ * 和后端 model.FormatMilliYuan 一致。 */
+export function milliToYuan(milli, opts) {
+  const o = opts || {};
+  const n = Math.round(Number(milli) || 0);
+  const neg = n < 0;
+  const abs = Math.abs(n);
+  const yuan = Math.floor(abs / 1000);
+  const frac = abs % 1000;
+  let body = groupThousands(yuan) + '.' + String(Math.floor(frac / 10)).padStart(2, '0');
+  if (frac % 10 !== 0) body += String(frac % 10);
+  const sign = neg ? '-' : '';
+  return o.symbol === false ? sign + body : sign + '¥' + body;
+}
+
+/* 用户输入的元 → 厘，最多三位小数。整数运算。 */
+export function yuanToMilli(input) {
+  const s = String(input == null ? '' : input).trim().replace(/[¥,\s]/g, '');
+  if (!s) return 0;
+  const m = /^(-)?(\d*)(?:\.(\d*))?$/.exec(s);
+  if (!m) return 0;
+  const sign = m[1] ? -1 : 1;
+  const yuan = m[2] ? parseInt(m[2], 10) : 0;
+  const fracStr = (m[3] || '').slice(0, 3).padEnd(3, '0');
+  return sign * (yuan * 1000 + parseInt(fracStr, 10));
+}
+
+/* 一行明细多少钱（分）= 只数 × 单只价（厘），向上取整到元。
+ * 必须和后端 model.LineAmount 同一个公式：页面上看到的就是最后要收的。 */
+export function lineAmount(quantity, unitPriceMilli) {
+  const total = (Number(quantity) || 0) * (Number(unitPriceMilli) || 0);
+  if (total <= 0) return 0;
+  return Math.ceil(total / 1000) * 100;
 }

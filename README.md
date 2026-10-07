@@ -31,7 +31,7 @@ curl localhost:8080/healthz
 # {"code":0,"msg":"ok","data":{"status":"ok"}}
 ```
 
-首次启动会自动建表，并在 `specs` 表为空时写入当季价目表（4 档 8 只装套餐）。
+首次启动会自动建表，并在 `specs` 表为空时写入当季价目表（母 2.5-4 两、公 3.5-5 两共 8 档，按只计价）。
 **已经跑起来的库不会被覆盖**——换价目表去小程序「设置」页，把旧的档停用、把新的加上。
 
 ### 构建与测试
@@ -66,8 +66,8 @@ internal/timex/     业务时区与时间格式
 2. **`paid_amount` 与 `pay_status` 是派生值**，不接受客户端赋值。实收只能通过「记一笔收款」加减（同时写一条带金额的操作流水），状态由 `applyPayStatus` 按实收与应收的大小关系推导。没有单独的收款流水表，记错了就再记一笔负数冲掉。
 3. **`goods_amount` / `payable_amount` 由服务端算**，忽略客户端传入值。
 4. **发货状态与收款状态互不约束**。熟客先发后付、预售先付后发都是正常业务，没有「未付款不能发货」这种校验。
-5. **明细里的 `spec_label` / `unit_price` 是快照**，不关联 `specs` 表。改价只影响新订单，历史订单金额不跟着变（有测试守着）。
-6. **公开写接口绝不接受客户端传的单价**。卖家录单的 `unit_price` 是客户端给的（临时改价是正常操作），但买家自助登记只收 `spec_id + quantity`，单价由服务端回查 `specs` 填快照。照抄录单那条路径就等于买家自己定价（有测试守着）。
+5. **明细里的 `spec_label` / `unit_price_milli` 是快照**，不关联 `specs` 表。改价只影响新订单，历史订单金额不跟着变（有测试守着）。
+6. **公开写接口绝不接受客户端传的单价**。卖家录单的 `unit_price_milli` 是客户端给的（临时改价是正常操作），但买家自助登记只收 `spec_id + quantity`，单价由服务端回查 `specs` 填快照。照抄录单那条路径就等于买家自己定价（有测试守着）。
 7. **所有多表写入都在一个 `BEGIN IMMEDIATE` 事务里**（`store.WithTx`）。
 8. **时间全走 `Asia/Shanghai`**，服务器时区可能是 UTC，业务时间一律经 `internal/timex`。
 
@@ -144,8 +144,8 @@ curl -X POST localhost:8080/api/orders \
     "wechat_nick": "老张",
     "wechat_remark": "同学介绍",
     "items": [
-      {"gender":"male","spec_gram":225,"spec_label":"4.5两","unit":"piece","quantity":5,"unit_price":8800},
-      {"gender":"female","spec_gram":175,"spec_label":"3.5两","unit":"piece","quantity":5,"unit_price":6800}
+      {"gender":"male","spec_gram":225,"spec_label":"4.5两","quantity":5,"unit_price_milli":88000},
+      {"gender":"female","spec_gram":175,"grade":"normal","spec_label":"3.5两","quantity":5,"unit_price_milli":68000}
     ],
     "freight_fee": 2000,
     "discount": 1000,
@@ -154,8 +154,14 @@ curl -X POST localhost:8080/api/orders \
   }'
 ```
 
-按盒的明细可以带 `pack_size`（一盒几只），不带就按「性别 + 克重 + 单位」回价目表查。
-每条明细存一个只数快照 `crab_count`（按只 = 数量，按盒 = 盒数 × 每盒只数，按斤 = 0），统计和运费分档都按它算。
+**明细一律按只记**，没有盒、也没有斤：`quantity` 是只数，`gender` 只有 `male` / `female`，
+`grade` 是品相（`normal` 正常 / `broken` 残蟹，不传按正常）。
+
+单只价 `unit_price_milli` 的单位是**厘**（0.001 元）：整盒价摊到每只除不尽，
+189 元 8 只 = 23.625 元/只，只有精确到厘，8 只才能正好算回 189。
+**明细金额 = 只数 × 单只价，向上取整到元**（`model.LineAmount`）：8 只 23.625 = 189，
+5 只 = 118.125 → 119。散买不加价，只是零头进位。厘只用在单价上，金额仍然一律是整数「分」。
+改版前的客户端如果还传 `unit_price`，接口直接返回 `40001`，不会当成单价 0 悄悄建单。
 `freight_fee` 是买家承担的运费，一般在发货时按规则定，见下面「运费」。
 
 **列表 / 筛选**（全部可选，多条件 AND）
@@ -193,7 +199,7 @@ curl -X PUT localhost:8080/api/orders/$ID \
   -d '{
     "receiver_name":"张三","phone":"13800138000",
     "address":"江苏省苏州市工业园区xx路88号3栋201",
-    "items":[{"gender":"male","spec_gram":225,"spec_label":"4.5两","unit":"piece","quantity":8,"unit_price":8800}],
+    "items":[{"gender":"male","spec_gram":225,"spec_label":"4.5两","quantity":8,"unit_price_milli":88000}],
     "freight_fee":2000,"discount":1000,"expect_ship_date":"2026-09-16","remark":"加了3只",
     "updated_at":"2026-09-14T11:00:00+08:00"
   }'
@@ -263,7 +269,8 @@ curl -X POST localhost:8080/api/orders/$ID/payments \
 | `freight_fee` | **买家承担**的运费，计入应收 |
 | `freight_settled_at` | 和快递结清的时间，`null` 表示没结 |
 
-卖家承担 = 实付 − 买家承担（`freight_seller`）。
+卖家承担 = 实付 − 买家承担（`freight_seller`）。买家承担**可以超过实付、甚至超过原价**：
+券是卖家花钱买的，用大额券寄的单实付很低，买家照常补运费，这时卖家承担是负数。只拦负数的买家承担。
 
 ```bash
 # 发货时顺手填运费（freight 整块可不传，之后再补）
@@ -297,14 +304,13 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/stats/dashboard?start
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/stats/ship-plan?date=2026-09-16'
 ```
 
-口径：`today.revenue` 是当天**实际收到的钱**（按收款流水的收款时间计，含退款负数）；`range.crab_count` 按蟹只数算（套餐按盒数 × 每盒只数，按斤的不计），`range.by_spec` 按「性别 + 克重 + 单位」分组；`freight.*` 是运费汇总（实付、买家承担、卖家承担、用券省下的、未结），区间同样按订单创建时间；`range.*` 按订单**创建时间**落在区间内统计；`pending.unpaid_amount` 不含已取消的订单。`ship-plan` 的 `date` 默认明天。
+口径：`today.revenue` 是当天**实际收到的钱**（按收款流水的收款时间计，含退款负数）；`range.crab_count` 是明细只数之和，`range.by_spec` 按「性别 + 克重 + 品相」分组；`freight.*` 是运费汇总（实付、买家承担、卖家承担、用券省下的、未结），区间同样按订单创建时间；`range.*` 按订单**创建时间**落在区间内统计；`pending.unpaid_amount` 不含已取消的订单。`ship-plan` 的 `date` 默认明天。
 
 **地址簿 / 价目表**
 
-价目表一档可以是**套餐**（按盒卖，`unit=box` + `pack_size>0`），也可以是**单规格**
-（按只/按斤卖，`pack_size=0`）。套餐的 `gender` 是 `mixed`、`unit_price` 是整盒价、
-`spec_gram` 是整盒克重；一盒里公母各几只不存在这张表里，由买家登记时自己定，
-价格不随比例变。
+价目表一档 = 一种蟹：**性别 + 克重 + 品相**，一只多少钱（`unit_price_milli`，厘）。
+三者组合唯一。没有「盒」：页面上的「8 只 ¥189」只是报价方式，由单只价算出来，
+接口里随规格一起给出 `pack_hint_amount`（8 只多少钱，分）。残蟹和同克重的正常蟹是两档，分开定价。
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/addresses?keyword=张&limit=20'
@@ -313,12 +319,12 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8080/api/specs          # 只�
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/specs?all=1'  # 连停用的一起返回
 
 curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
-  -d '{"gender":"male","spec_gram":300,"spec_label":"6.0两","unit":"piece","unit_price":16800}'
-# 套餐档：整盒价 + 一盒几只
+  -d '{"gender":"female","spec_gram":150,"spec_label":"3两","unit_price_milli":33625}'
+# 残蟹：同一克重另起一档
 curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
-  -d '{"gender":"mixed","spec_gram":1200,"spec_label":"8只装 母2.5两/公3.5两","unit":"box","unit_price":18900,"pack_size":8}'
+  -d '{"gender":"female","spec_gram":150,"grade":"broken","spec_label":"3两","unit_price_milli":20000}'
 curl -X PUT localhost:8080/api/specs/3 -H "Authorization: Bearer $TOKEN" \
-  -d '{"gender":"male","spec_gram":225,"spec_label":"4.5两","unit":"piece","unit_price":9500}'
+  -d '{"gender":"female","spec_gram":150,"spec_label":"3两","unit_price_milli":35000}'
 curl -X DELETE localhost:8080/api/specs/3 -H "Authorization: Bearer $TOKEN"   # 停用，不物理删
 ```
 
@@ -364,7 +370,7 @@ curl -X POST localhost:8080/api/public/registrations \
     "phone": "13900139001",
     "address": "江苏省苏州市姑苏区平江路100号2单元501",
     "wechat_nick": "四哥",
-    "items": [{"spec_id": 1, "quantity": 13, "male_count": 7}],
+    "items": [{"spec_id": 1, "quantity": 13}, {"spec_id": 6, "quantity": 8}],
     "expect_ship_date": "2026-09-20",
     "remark": "工作日收不到，周末发"
   }'
@@ -380,25 +386,12 @@ curl -X POST localhost:8080/api/public/registrations \
   撞 `uk_orders_request` 唯一索引。重复提交返回原来那笔单（`code 0` + `idempotent: true`），
   不是错误，也不会重复建单。**不需要服务端记账，所以没有新表。**
   幂等命中的回执里**姓名打码**——链接会被转发，拿到转发链接的人提交一次就能看到这张回执。
-- **单价只认 `specs` 表**：买家只传 `spec_id + quantity`（套餐再加一个 `male_count`），
-  `unit_price` / `freight_fee` / `discount` 传了也不看。运费与优惠留给卖家在小程序里补。
-- **买家填的是只数，不是盒数**。`quantity` 一律按只算，服务端拆成整盒 + 零头：
-  13 只 = 1 盒 + 散 5 只。买家不该为了用这个页面先自己算清楚凑不凑得满一盒。
-- **凑不满整盒的零头按散买价算**，散买价 = 整盒价摊到只后**向上取整到元**
-  （189 ÷ 8 = 23.625 → 24 元），随价目表一起下发（`loose_price`）。
-  取到元而不是到分，一来报价好说出口，二来天然保证整盒比散买划算
-  （8 只散买 192 > 整盒 189），不会出现凑不满盒反而更便宜。有测试守着这个方向。
-- **起订 5 只只管散买**（`service.RegMinCrabs`，随价目表下发 `min_loose`）。
-  零头不是 0 就必须 ≥ 5：9 只会被拒，并在提示里直接给出「改成 8 只或 13 只」。
-  整盒买多少都行。只卡买家这条路径——卖家给熟客记一只也是正常业务，录单接口不受限制。
-- **一档可能拆成两条明细**：整盒一条（`unit=box`，整盒价）、散只一条
-  （`unit=piece`，散买价，`spec_label` 带「散只」）。公母按比例分摊到两条，
-  整盒那份四舍五入，两条加起来等于买家填的公母数（有覆盖 n=5..40 全组合的测试）。
-- **公母比例只影响明细快照，不影响金额**。`male_count` 是这一档里公的只数，
-  不传就是一半一半（所以它在请求里是可空的——传 `0` 表示整档都要母的，和「没传」
-  不是一回事），越界返回 40001。比例写进 `spec_label`，形如
-  `8只装 母2.5两/公3.5两（公4母4）`，卖家照着配货就行。
-  **自由搭配**就是一次登记里混几档，各算各的。
+- **单价只认 `specs` 表**：买家只传 `spec_id + quantity`（只数），
+  `unit_price` / `unit_price_milli` / `freight_fee` / `discount` 传了也不看。运费与优惠留给卖家在小程序里补。
+- **一档一行，按只计价**：13 只就是一行 13 只，金额 = 只数 × 单只价，向上取整到元，
+  和卖家录单同一个公式。散买不加价。公母是两种规格，想要几公几母就各选各的。
+- **起订 5 只卡整单**（`service.RegMinCrabs`，随价目表下发 `min_quantity`），跨档凑数也算。
+  只卡买家这条路径——卖家给熟客记一只也是正常业务，录单接口不受限制。
 - **手机号一天内查重**：同号第二次提交返回 `40901`，提示「已经登记过了」。
   提示里**不回单号**——链接可能被转发，不能让持链接的人拿任意手机号反查出别人的单号
   （有了单号和手机号就能在查单页看到脱敏详情）。
@@ -417,18 +410,14 @@ cd /opt/crab-order
 `internal/auth` 一致）再调接口。**没有新增任何鉴权旁路**——能跑这脚本的人本来就能读
 `.env`，权限没有被放大。这是后路，不是日常流程。
 
-换价目表同理，有现成的 SQL（种子只在 `specs` 表为空时写入，老库升级后要手动换一次）：
-
-```bash
-docker compose exec -T api sqlite3 /data/crab.db < scripts/price-packs.sql
-```
-
-只停用旧档、不物理删除；订单明细是快照，历史金额不受影响。可重复执行。
+价目表改版（按盒 → 按只）随后端升级自动完成：老规格表改名 `specs_legacy` 留底，
+新表写入按只计价的种子价目表；老订单明细换成只数 + 单只价，**金额一分不动**。
+之后换价都在小程序「设置」页改。
 
 卖家侧：列表支持 `?source=web` 筛出买家登记的单，CSV 导出多一列「来源」，
 订单卡片和详情页会标出来（灰字，不是彩色标签——它是出处，不是待办）。
-小程序的「选规格」与「设置」页都认套餐：页签按价目表里实际有的分组生成，
-全是套餐时不会摆两个空的「公 / 母」页签。
+小程序的「选规格」按「母 / 公」分页签（价目表里没有公蟹就不摆空页签），
+数量默认 8 只，格子里写着「8 只多少钱」和单只价；单只价可以临时改，只影响这一单。
 
 ## 前端
 
@@ -474,7 +463,7 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 
 - **`/api/stats/ship-plan?date=` 必须传 `YYYY-MM-DD`**，传 `today` 这种字面量会 400；
   而且不传时后端默认给的是**明天**，首页要今天就得显式传当天。
-- **订单明细是快照**，建单时要把 `gender / spec_gram / spec_label / unit / quantity / unit_price`
+- **订单明细是快照**，建单时要把 `gender / spec_gram / grade / spec_label / quantity / unit_price_milli`
   整条带过去，后端不认 `spec_id`。改价不影响历史订单就是靠这个。
 - **允许超付**：`unpaid_amount` 会是负数，详情页显示「多收 ¥X」并且用主色，不是告警色。
 - **`DELETE /api/specs/{id}` 是停用**，不是物理删；设置页要 `?all=1` 才看得到停用的档。
@@ -507,33 +496,22 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 同样是单个静态 HTML，同一套色板与排版规矩，无构建步骤、无框架、无 CDN、无埋点。
 链接形如 `https://<域名>/r?t=<token>`，没有 `t=` 或 token 过期都直接给一句话，不显示表单。
 
-选货分两类，两类之间单选：
-
-- **按套餐**（默认）：四档单选，默认落在第二档（¥269，主推那一档），再选几盒。
-  整盒的公母一律各一半，这里不给调——想自己配比例就去自由搭配按只挑，
-  同一档凑满一盒照样按整盒价算，不必在套餐这边再放一组加减器。
-- **自由搭配**：四档 × 公母共八行，各自加减只数。同档公母同价，两行挨着放，
-  一眼看出是一个价。
-
-**两类是合并的，不是二选一**：买 2 盒再加几只散的是常事，页签只负责分类展示，
-选的东西都算进同一张单。两类都选了东西时合计上方列出分项（套餐一行、散买一行）——
-否则你在自由搭配页签上看不见套餐那边选了什么，只看到合计凭空多出几百块。
-整单 5 只起，跨档凑数也算。
+选货就是一张清单：母蟹、公蟹两组，一种蟹一行，每行写着「8 只 ¥189　约 ¥23.6 / 只」，
+带加减器和一个「+8」快捷键（8 只一盒是大家习惯的买法，一下加满）。
+默认给第二个母蟹档放 8 只（往年主推的那档），多数人不用动就能往下填。整单 5 只起，跨档凑数也算。
 
 几个刻意的选择：
 
-- 同一档凑满一盒自动按整盒价算，并显示一行「这档凑满 1 盒，按整盒价算，省 ¥3.00」。
-  8 × ¥34 = ¥272 但实际收 ¥269，不写出来买家会以为金额算错了。
-- 页面的金额算法和后端 `splitPack` 是同一套（整盒 + 零头），两边算不一样的话
-  回执金额和页面显示就对不上。
+- 页面的金额算法和后端 `model.LineAmount` 是同一个公式（只数 × 单只价，向上取整到元），
+  两边算不一样的话回执金额和页面显示就对不上。单只价只显示到角（「约 ¥23.6」），
+  真正算钱用的是精确值。
 - **选货的错误贴着合计显示**，不甩到页尾的提交按钮下面——买家看见提示时，
   要改的东西就在眼前；一动选货就清掉，免得留着一句过时的红字。
   收货信息的错误仍在按钮旁。
 
 - 合计只是**货款预估**，不含运费，页面上明写「运费和最终费用等发出后确认」；
   回执里显示的是**后端返回的 `payable_amount`**，不是页面自己加的那个数。
-- 比例默认一半一半，**没动过就不传 `male_count`**，让后端取默认值——两边的默认值是同一个，
-  不在前端复制一份。散买价与起订量同理，都是跟着价目表下发的，页面不写死数字。
+- 起订量、「8 只」这个报价口径都是跟着价目表下发的（`min_quantity` / `pack_hint`），页面不写死数字。
 - 金额一律按「分」的整数算，分转元走整数运算，前端也不碰浮点。
 - 加减只改动过的那几个节点，不重建整个列表——重建会让刚点的按钮换一个 DOM 节点，
   连点时焦点和触摸态都会丢。
