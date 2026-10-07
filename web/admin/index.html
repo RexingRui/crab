@@ -641,6 +641,37 @@ td .sub{display:block;color:var(--muted);font-size:12px}
 
   // 每个动作：什么状态下出现、要填什么、怎么调接口。只放后端状态机允许的那几种。
   var ACTIONS = [
+    { key: 'edit', label: '改信息', show: function () { return true },
+      fields: function (o) {
+        return [
+          { id: 'name', label: '收货人', type: 'text', value: o.receiver_name },
+          { id: 'phone', label: '手机号', type: 'text', value: o.phone },
+          { id: 'addr', label: '地址', type: 'text', value: o.address, full: true },
+          { id: 'nick', label: '微信昵称（付款人）', type: 'text', value: o.wechat_nick },
+          { id: 'wxremark', label: '微信备注名', type: 'text', value: o.wechat_remark },
+          { id: 'date', label: '期望发货日（可不填）', type: 'date', value: o.expect_ship_date || '' },
+          { id: 'remark', label: '备注', type: 'text', value: o.remark }
+        ]
+      },
+      // 改单接口是整单覆盖：明细、补运费、优惠原样带回去，金额和状态都不会变。
+      // 带上 updated_at 做乐观锁：两台设备同时改同一单，后提交的会被拦下来提示刷新。
+      run: function (o, v) {
+        var name = v.name.trim(), phone = v.phone.trim(), addr = v.addr.trim()
+        if (!name) throw new Error('收货人还没填')
+        if (!/^1[3-9]\d{9}$/.test(phone)) throw new Error('手机号看着不对')
+        if (addr.length < 5) throw new Error('地址写详细一点')
+        return api('PUT', '/api/orders/' + o.id, {
+          receiver_name: name, phone: phone, address: addr,
+          wechat_nick: v.nick.trim(), wechat_remark: v.wxremark.trim(),
+          items: (o.items || []).map(function (it) {
+            return { gender: it.gender, spec_gram: it.spec_gram, grade: it.grade, spec_label: it.spec_label,
+              quantity: it.quantity, unit_price_milli: it.unit_price_milli }
+          }),
+          freight_fee: o.freight_fee, discount: o.discount,
+          expect_ship_date: v.date || '', remark: v.remark.trim(),
+          updated_at: o.updated_at
+        })
+      } },
     { key: 'ship', label: '发货', show: function (o) { return o.ship_status === 'pending' },
       fields: function (o) {
         return [
@@ -811,10 +842,11 @@ td .sub{display:block;color:var(--muted);font-size:12px}
       } else {
         input = '<input data-f="' + f.id + '"' +
           (f.type === 'datetime' ? ' type="datetime-local"' : '') +
+          (f.type === 'date' ? ' type="date"' : '') +
           (f.type === 'money' ? ' class="num" inputmode="decimal"' : '') +
           ' value="' + esc(f.value || '') + '">'
       }
-      return '<div><label>' + esc(f.label) + '</label>' + input +
+      return '<div' + (f.full ? ' class="full"' : '') + '><label>' + esc(f.label) + '</label>' + input +
         (f.hint ? '<div class="hint" data-hint="' + f.id + '"></div>' : '') + '</div>'
     }).join('')
     if (!fields.length) {
