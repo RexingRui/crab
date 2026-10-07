@@ -22,4 +22,5 @@ dist/
 
 # 批量录单的真实数据（含客户隐私），只留模板
 /import/*.csv
+/import/*.json
 !/import/orders.template.csv
