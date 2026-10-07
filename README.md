@@ -522,8 +522,14 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 
 ### 卖家订单表（`web/admin/index.html`）
 
-小程序上线前的过渡工具：单个 HTML，无框架、无 CDN，**在自己电脑上双击打开**就能用。
-第一次打开填接口地址和管理员 token（只存在这台电脑的浏览器里），之后：
+小程序上线前的过渡工具：单个 HTML，无框架、无 CDN。两种打开方式：
+
+- **由服务器提供**（推荐，iPad / 手机也能用）：Caddy 把它挂在 `/admin`，
+  浏览器打开 `http://<服务器>/admin`（备案后 `https://<域名>/admin`）。和接口同源，接口地址留空即可，也不需要放行跨域。
+  页面本身不含任何数据，读写都要管理员 token。
+- **电脑上双击打开**（`file://`）：要填接口地址，并按下面放行跨域。iPad 的「文件」App 不运行网页脚本，这种方式在 iPad 上用不了。
+
+第一次打开填管理员 token（只存在这台设备的浏览器里），之后：
 
 - 一张表列出全部订单（后端分页一页页拉完合起来，页面上不分页），按关键词 / 发货状态 / 收款状态筛选，
   顶上一行是筛选结果的单数、应收、已收、未收、只数。
@@ -534,8 +540,8 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
   填 / 改运费（买家补的空着就按规则算）、运费已和快递结清、取消订单，以及撤回发货 / 撤回签收 / 恢复订单
   （回退必须写原因，记进操作流水）。
 
-本地打开的页面（`file://`）去请求服务器属于跨域，生产环境后端不发 CORS 头，
-所以要在 Caddy 那一侧放行。备案前按 IP 访问时，把 IP 那段站点写成这样：
+备案前按 IP 访问时，IP 那段站点写成下面这样：`/admin` 提供页面，
+跨域那几行留给电脑上 `file://` 打开的用法（生产环境后端不发 CORS 头）：
 
 ```caddyfile
 http://<服务器IP> {
@@ -553,9 +559,18 @@ http://<服务器IP> {
 	handle /healthz {
 		reverse_proxy api:8080
 	}
+	handle /admin* {
+		header X-Robots-Tag noindex
+		rewrite * /index.html
+		file_server {
+			root /srv/admin
+		}
+	}
 	respond 404
 }
 ```
+
+`/srv/admin` 由 `docker-compose.yml` 里 caddy 的 `./web/admin` 挂载提供；域名站点（`deploy/Caddyfile`）里已经带了同样的 `/admin`。
 
 放行 `*` 是安全的：除了买家查单 / 登记这两条本来就公开的接口，其余都要 Bearer token，
 别的网站拿不到 token 什么也做不了；也没有用 cookie，不存在跨站带凭证的问题。

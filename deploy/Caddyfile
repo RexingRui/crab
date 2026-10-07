@@ -44,6 +44,15 @@
 		}
 	}
 
+	# 卖家订单表：页面本身不含数据，读写都要管理员 token；和接口同源，不需要放行跨域。
+	handle /admin* {
+		header X-Robots-Tag noindex
+		rewrite * /index.html
+		file_server {
+			root /srv/admin
+		}
+	}
+
 	# 其余路径不对外暴露任何东西（/healthz 也不放出去，容器自己会自检）
 	handle {
 		respond "Not Found" 404

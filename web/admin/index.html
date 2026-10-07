@@ -7,7 +7,9 @@
 <meta name="referrer" content="no-referrer">
 <title>蟹记 · 订单</title>
 <!--
-  卖家用的订单表：本机直接双击打开（file://），填一次接口地址和 token 就能用。
+  卖家用的订单表。两种用法：
+  - 由服务器提供（Caddy 的 /admin）：接口地址留空就用当前网址，iPad 的 Safari 也能用；
+  - 本机直接双击打开（file://）：要填接口地址，服务器那一侧放行跨域。
   单文件、无框架、无 CDN。数据全部从后端实时读写，页面本身不存任何订单。
   接口地址与 token 只存在这台电脑的浏览器里（localStorage）。
 
@@ -147,7 +149,7 @@ td .sub{display:block;color:var(--muted);font-size:12px}
     <div class="row">
       <div>
         <label for="base">接口地址</label>
-        <input id="base" placeholder="http://服务器IP 或 https://域名" autocomplete="off">
+        <input id="base" placeholder="留空 = 用当前网址" autocomplete="off">
       </div>
       <div>
         <label for="token">管理员 token</label>
@@ -330,8 +332,16 @@ td .sub{display:block;color:var(--muted);font-size:12px}
 
   // ---------- 接口 ----------
 
+  // 页面由服务器提供时（http / https 打开），接口就在同一个网址下，不用填；
+  // 本机双击打开（file://）时没有「当前网址」，必须填。
+  function apiBase() {
+    var b = load(LS_BASE).replace(/\/+$/, '')
+    if (b) return b
+    return /^https?:$/.test(location.protocol) ? location.origin : ''
+  }
+
   function api(method, path, body) {
-    var base = load(LS_BASE).replace(/\/+$/, ''), token = load(LS_TOKEN)
+    var base = apiBase(), token = load(LS_TOKEN)
     if (!base || !token) return Promise.reject(new Error('先在「连接设置」里填好接口地址和 token'))
     var opt = { method: method, headers: { Authorization: 'Bearer ' + token } }
     if (body) {
@@ -367,7 +377,7 @@ td .sub{display:block;color:var(--muted);font-size:12px}
   // ---------- 列表 ----------
 
   function refreshConn() {
-    var base = load(LS_BASE), token = load(LS_TOKEN), el = $('conn')
+    var base = apiBase(), token = load(LS_TOKEN), el = $('conn')
     if (!base || !token) { el.innerHTML = '<span class="bad">未连接</span>'; return }
     var exp = tokenExp(token), now = Date.now() / 1000
     var expText = ''
@@ -863,7 +873,7 @@ td .sub{display:block;color:var(--muted);font-size:12px}
 
   $('base').value = load(LS_BASE)
   $('token').value = load(LS_TOKEN)
-  if (!load(LS_BASE) || !load(LS_TOKEN)) $('settings').className = 'card settings on'
+  if (!apiBase() || !load(LS_TOKEN)) $('settings').className = 'card settings on'
 
   $('toggleSettings').addEventListener('click', function () {
     var s = $('settings')
@@ -901,7 +911,7 @@ td .sub{display:block;color:var(--muted);font-size:12px}
   })
 
   refreshConn()
-  if (load(LS_BASE) && load(LS_TOKEN)) reload()
+  if (apiBase() && load(LS_TOKEN)) reload()
 })()
 </script>
 </body>
