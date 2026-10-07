@@ -520,6 +520,47 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 
 两个页面共用一个域名，小程序里配在「设置」的那一项（`TARO_APP_TRACK_URL`）。
 
+### 卖家订单表（`web/admin/index.html`）
+
+小程序上线前的过渡工具：单个 HTML，无框架、无 CDN，**在自己电脑上双击打开**就能用。
+第一次打开填接口地址和管理员 token（只存在这台电脑的浏览器里），之后：
+
+- 一张表列出全部订单（后端分页一页页拉完合起来，页面上不分页），按关键词 / 发货状态 / 收款状态筛选，
+  顶上一行是筛选结果的单数、应收、已收、未收、只数。
+- 「+ 录入」弹窗：收货信息、付款人、几种蟹（默认一行 8 只，单只价可改）、补运费、优惠、已收款。
+  金额和后端同一个公式实时算；保存用幂等键，网络抖动重试不会重复建单，也不会重复记收款。
+- 点表格里任意一行打开详情：明细、金额、收款流水、物流、运费一屏看完，下面按这单当前的状态
+  只给出后端状态机允许的操作——发货（可顺手填运费）、标记签收、记收款（退款写负数）、
+  填 / 改运费（买家补的空着就按规则算）、运费已和快递结清、取消订单，以及撤回发货 / 撤回签收 / 恢复订单
+  （回退必须写原因，记进操作流水）。
+
+本地打开的页面（`file://`）去请求服务器属于跨域，生产环境后端不发 CORS 头，
+所以要在 Caddy 那一侧放行。备案前按 IP 访问时，把 IP 那段站点写成这样：
+
+```caddyfile
+http://<服务器IP> {
+	header {
+		Access-Control-Allow-Origin "*"
+		Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "Authorization, Content-Type"
+		Access-Control-Max-Age "86400"
+	}
+	handle /api/* {
+		@preflight method OPTIONS
+		respond @preflight 204
+		reverse_proxy api:8080
+	}
+	handle /healthz {
+		reverse_proxy api:8080
+	}
+	respond 404
+}
+```
+
+放行 `*` 是安全的：除了买家查单 / 登记这两条本来就公开的接口，其余都要 Bearer token，
+别的网站拿不到 token 什么也做不了；也没有用 cookie，不存在跨站带凭证的问题。
+注意这段走的是明文 HTTP，token 和客户信息在传输中可能被看到，备案后换成 HTTPS 域名。
+
 ## 部署
 
 本节讲服务端。小程序发版是另一条线，见 [`mini-deploy.md`](mini-deploy.md)。

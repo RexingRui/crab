@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>蟹记 · 订单</title>
+<!--
+  卖家用的订单表：本机直接双击打开（file://），填一次接口地址和 token 就能用。
+  单文件、无框架、无 CDN。数据全部从后端实时读写，页面本身不存任何订单。
+  接口地址与 token 只存在这台电脑的浏览器里（localStorage）。
+
+  本地打开的页面去请求服务器属于跨域，服务器那一侧要放行 CORS（README「卖家订单表」一节有现成的
+  Caddy 配置）。小程序上线后这个页面就可以退休了。
+-->
+<style>
+:root{
+  --shell:#2F4739;--shell-deep:#1C231E;--claw:#C8A227;--boiled:#D2542A;
+  --belly:#EFF2EE;--card:#FFF;--line:#DCE2DC;--muted:#6B7670;--hl:#FFF8DC;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--belly);color:var(--shell-deep);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;padding:0 16px 48px;
+}
+.wrap{max-width:1400px;margin:0 auto}
+header{display:flex;align-items:baseline;gap:12px;padding:20px 0 12px;flex-wrap:wrap}
+header h1{margin:0;font-size:20px;color:var(--shell);letter-spacing:.06em}
+header .conn{font-size:12px;color:var(--muted)}
+header .conn b{font-weight:600}
+header .conn .bad{color:var(--boiled)}
+header .sp{flex:1}
+.link{background:none;border:none;color:var(--shell);font:inherit;font-size:13px;padding:0;cursor:pointer;text-decoration:underline}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.settings{display:none}
+.settings.on{display:block}
+.settings .row{display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:end}
+@media (max-width:720px){.settings .row{grid-template-columns:1fr}}
+
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+input,select,textarea{
+  font:inherit;color:inherit;background:var(--card);
+  border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%;
+}
+textarea{resize:vertical;min-height:60px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--shell)}
+.num{font-variant-numeric:tabular-nums}
+
+button.btn{
+  font:inherit;font-size:14px;border-radius:8px;padding:7px 14px;cursor:pointer;
+  border:1px solid var(--line);background:var(--card);color:var(--shell);white-space:nowrap;
+}
+button.btn.primary{background:var(--shell);color:#fff;border-color:var(--shell);font-weight:600}
+button.btn:disabled{opacity:.45;cursor:default}
+
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.bar input[type=search]{width:260px;max-width:100%}
+.bar select{width:auto}
+.bar .sp{flex:1}
+.sum{font-size:13px;color:var(--muted);margin:0 0 8px}
+.sum b{color:var(--shell-deep);font-weight:600}
+
+.err{color:var(--boiled);font-size:13px;min-height:18px;margin:4px 0}
+.err:empty{display:none}
+
+.tbl-wrap{overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:12px;max-height:calc(100vh - 220px)}
+table{border-collapse:collapse;width:100%;min-width:1180px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{position:sticky;top:0;background:#F6F8F5;font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap;z-index:1}
+td{font-size:13px}
+tr:hover td{background:#FAFBF9}
+tr.new td{background:var(--hl)}
+td.r,th.r{text-align:right}
+td.nowrap{white-space:nowrap}
+td.addr{max-width:240px}
+td.items{max-width:220px}
+td .sub{display:block;color:var(--muted);font-size:12px}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.tag.pending{color:var(--claw);border-color:var(--claw)}
+.tag.shipped{color:var(--shell);border-color:var(--shell)}
+.tag.unpaid,.tag.partial{color:var(--boiled);border-color:var(--boiled)}
+.tag.muted{color:var(--muted)}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+
+/* 弹窗 */
+.mask{position:fixed;inset:0;background:rgba(28,35,30,.45);display:none;align-items:flex-start;justify-content:center;padding:32px 16px;overflow:auto;z-index:10}
+.mask.on{display:flex}
+.modal{background:var(--card);border-radius:14px;width:100%;max-width:720px;padding:20px 22px 18px;box-shadow:0 12px 40px rgba(28,35,30,.25)}
+.modal h2{margin:0 0 14px;font-size:17px;color:var(--shell)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid .full{grid-column:1/-1}
+@media (max-width:600px){.grid{grid-template-columns:1fr}}
+.sec{font-size:12px;color:var(--muted);letter-spacing:.06em;margin:18px 0 6px;padding-top:12px;border-top:1px solid var(--line)}
+.items-tbl{width:100%;min-width:0;border-collapse:collapse}
+.items-tbl th{position:static;background:none;border:none;padding:0 6px 2px 0;font-weight:400}
+.items-tbl td{border:none;padding:4px 6px 4px 0;vertical-align:middle}
+.items-tbl td.qc,.items-tbl td.pc,.items-tbl th.qc,.items-tbl th.pc{width:1%}
+.items-tbl td.amt{width:90px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.items-tbl td.del{width:30px}
+.items-tbl .q{width:80px}
+.items-tbl .p{width:110px}
+.x{background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:0 4px}
+.hint{font-size:12px;color:var(--muted)}
+.total{display:flex;justify-content:flex-end;gap:18px;margin-top:14px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.total b{color:var(--shell-deep);font-size:18px;font-variant-numeric:tabular-nums}
+.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
+
+/* 表格行可以点开详情 */
+#rows tr[data-id]{cursor:pointer}
+
+/* 详情弹窗 */
+.d-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.d-head h2{margin:0;flex:1;min-width:0}
+.kv{display:grid;grid-template-columns:84px 1fr;gap:4px 12px;font-size:13px}
+.kv .k{color:var(--muted)}
+.kv .v{word-break:break-all}
+.d-items{width:auto;min-width:0;border-collapse:collapse;margin-top:2px}
+.d-items td{border:none;padding:2px 8px 2px 0;font-size:13px}
+.d-items td.r{text-align:right;font-variant-numeric:tabular-nums}
+.ops{display:flex;gap:8px;flex-wrap:wrap}
+.ops .btn.warn{color:var(--boiled);border-color:var(--boiled)}
+.ops .btn.on{background:var(--shell);color:#fff;border-color:var(--shell)}
+.panel{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#FAFBF9;display:none}
+.panel.on{display:block}
+.ok{color:var(--shell);font-size:13px;min-height:18px;margin:6px 0 0}
+.ok:empty{display:none}
+.pays{font-size:13px;margin:0;padding:0;list-style:none}
+.pays li{display:flex;gap:10px;padding:2px 0}
+.pays .t{color:var(--muted);font-variant-numeric:tabular-nums;width:92px;flex:none}
+.pays .a{font-variant-numeric:tabular-nums;width:72px;flex:none;text-align:right}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>蟹记 · 订单</h1>
+    <span class="conn" id="conn">未连接</span>
+    <span class="sp"></span>
+    <button class="link" type="button" id="toggleSettings">连接设置</button>
+  </header>
+
+  <div class="card settings" id="settings">
+    <div class="row">
+      <div>
+        <label for="base">接口地址</label>
+        <input id="base" placeholder="http://服务器IP 或 https://域名" autocomplete="off">
+      </div>
+      <div>
+        <label for="token">管理员 token</label>
+        <input id="token" placeholder="服务器上签出来的那一串" autocomplete="off" spellcheck="false">
+      </div>
+      <button class="btn primary" type="button" id="saveConn">保存并刷新</button>
+    </div>
+    <div class="hint" style="margin-top:8px">只存在这台电脑的浏览器里。token 过期后在服务器上重新签一个贴进来。</div>
+  </div>
+
+  <div class="bar">
+    <input type="search" id="q" placeholder="搜单号 / 收件人 / 手机 / 微信 / 地址 / 运单号">
+    <select id="fShip">
+      <option value="">发货：全部</option>
+      <option value="pending">待发货</option>
+      <option value="shipped">已发货</option>
+      <option value="received">已收货</option>
+      <option value="cancelled">已取消</option>
+    </select>
+    <select id="fPay">
+      <option value="">收款：全部</option>
+      <option value="unpaid">未付款</option>
+      <option value="partial">部分付款</option>
+      <option value="paid">已付清</option>
+    </select>
+    <span class="sp"></span>
+    <button class="btn" type="button" id="reload">刷新</button>
+    <button class="btn primary" type="button" id="openNew">+ 录入</button>
+  </div>
+  <div class="err" id="listErr"></div>
+  <p class="sum" id="sum"></p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>单号</th><th>下单</th><th>收件人</th><th>地址</th><th>微信</th><th>明细</th>
+          <th class="r">只数</th><th class="r">应收</th><th class="r">已收</th>
+          <th>发货</th><th>收款</th><th>运单号</th><th>备注</th>
+        </tr>
+      </thead>
+      <tbody id="rows"><tr><td colspan="13" class="empty">先在「连接设置」里填好接口地址和 token</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="mask" id="mask">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <h2 id="mTitle">录入订单</h2>
+    <div class="grid">
+      <div><label for="fName">收货人</label><input id="fName" maxlength="32"></div>
+      <div><label for="fPhone">手机号</label><input id="fPhone" maxlength="11" inputmode="numeric"></div>
+      <div class="full"><label for="fAddr">地址</label><input id="fAddr" maxlength="200" placeholder="省 / 市 / 区 + 详细地址"></div>
+      <div><label for="fNick">微信昵称（付款人）</label><input id="fNick" maxlength="32"></div>
+      <div><label for="fRemarkName">微信备注名</label><input id="fRemarkName" maxlength="32"></div>
+    </div>
+
+    <div class="sec">要什么蟹（按只计价：只数 × 单只价，向上取整到元）</div>
+    <table class="items-tbl">
+      <thead><tr><th>规格</th><th class="qc">只数</th><th class="pc">单只价（元）</th><th class="r">金额</th><th></th></tr></thead>
+      <tbody id="itemRows"></tbody>
+    </table>
+    <button class="btn" type="button" id="addItem" style="margin-top:6px">+ 加一种</button>
+
+    <div class="sec">费用与收款</div>
+    <div class="grid">
+      <div><label for="fFee">买家补运费（元）</label><input id="fFee" class="num" inputmode="decimal" placeholder="0"></div>
+      <div><label for="fDisc">优惠（元）</label><input id="fDisc" class="num" inputmode="decimal" placeholder="0"></div>
+      <div><label for="fPaid">已收款（元，可不填）</label><input id="fPaid" class="num" inputmode="decimal" placeholder="0"></div>
+      <div><label for="fMethod">收款方式</label>
+        <select id="fMethod">
+          <option value="wechat">微信</option><option value="alipay">支付宝</option>
+          <option value="cash">现金</option><option value="transfer">银行转账</option><option value="other">其他</option>
+        </select>
+      </div>
+      <div><label for="fDate">期望发货日（可不填）</label><input id="fDate" type="date"></div>
+      <div><label for="fRemark">备注</label><input id="fRemark" maxlength="200"></div>
+    </div>
+
+    <div class="total">
+      <span>货款 <b id="tGoods">¥0</b></span>
+      <span>应收 <b id="tPayable">¥0</b></span>
+    </div>
+    <div class="err" id="formErr"></div>
+    <div class="actions">
+      <button class="btn" type="button" id="cancel">取消</button>
+      <button class="btn primary" type="button" id="submit">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="dMask">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dTitle">
+    <div class="d-head">
+      <h2 id="dTitle">订单</h2>
+      <span id="dTags"></span>
+      <button class="x" type="button" id="dClose" aria-label="关闭">×</button>
+    </div>
+    <div id="dBody"><div class="empty">加载中…</div></div>
+
+    <div class="sec">更新</div>
+    <div class="ops" id="dOps"></div>
+    <div class="panel" id="dPanel">
+      <div class="grid" id="dFields"></div>
+      <div class="err" id="dErr"></div>
+      <div class="actions">
+        <button class="btn" type="button" id="dPanelCancel">算了</button>
+        <button class="btn primary" type="button" id="dPanelGo">确定</button>
+      </div>
+    </div>
+    <div class="ok" id="dOk"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict'
+  var $ = function (id) { return document.getElementById(id) }
+  var LS_BASE = 'crab.admin.base', LS_TOKEN = 'crab.admin.token'
+  var PACK_HINT = 8
+
+  var orders = []     // 全部订单摘要（后端分页拉完再合起来）
+  var specs = []      // 启用中的规格
+  var highlight = ''  // 刚录入的单号，表格里标黄
+  var requestId = ''  // 这一次录入的幂等键：保存失败重试用同一个，成功后才换
+
+  // ---------- 小工具 ----------
+
+  function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v) } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k) || '' } catch (e) { return '' } }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    })
+  }
+
+  // 金额一律用整数：分 / 厘。分转元走整数运算，不碰浮点。
+  function yuan(fen) {
+    var n = Math.round(Number(fen) || 0), sign = n < 0 ? '-' : ''
+    n = Math.abs(n)
+    var f = n % 100
+    return sign + '¥' + Math.floor(n / 100) + (f ? '.' + (f < 10 ? '0' + f : f) : '')
+  }
+
+  // 用户输入的元 → 整数单位。places=2 得分，places=3 得厘。格式不对返回 null。
+  function parseUnits(s, places) {
+    s = String(s == null ? '' : s).trim().replace(/[¥,\s]/g, '')
+    if (!s) return 0
+    var m = /^(\d*)(?:\.(\d*))?$/.exec(s)
+    if (!m || (m[2] && m[2].length > places)) return null
+    var scale = Math.pow(10, places)
+    return (m[1] ? parseInt(m[1], 10) : 0) * scale + parseInt((m[2] || '').padEnd(places, '0') || '0', 10)
+  }
+
+  function milliText(m) {
+    var y = Math.floor(m / 1000), f = m % 1000
+    var s = String(f).padStart(3, '0')
+    return y + '.' + (s[2] === '0' ? s.slice(0, 2) : s)
+  }
+
+  // 和后端 model.LineAmount 同一个公式：只数 × 单只价，向上取整到元，返回分
+  function lineAmount(qty, milli) {
+    var t = qty * milli
+    return t > 0 ? Math.ceil(t / 1000) * 100 : 0
+  }
+
+  function day(s) {
+    var m = /^\d{4}-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(s || ''))
+    return m ? (+m[1]) + '/' + (+m[2]) + ' ' + m[3] + ':' + m[4] : ''
+  }
+
+  // token 是 base64url(payload).签名，payload 里的 exp 是过期时间（Unix 秒）
+  function tokenExp(t) {
+    try {
+      var p = t.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')
+      return JSON.parse(atob(p)).exp || 0
+    } catch (e) { return 0 }
+  }
+
+  // ---------- 接口 ----------
+
+  function api(method, path, body) {
+    var base = load(LS_BASE).replace(/\/+$/, ''), token = load(LS_TOKEN)
+    if (!base || !token) return Promise.reject(new Error('先在「连接设置」里填好接口地址和 token'))
+    var opt = { method: method, headers: { Authorization: 'Bearer ' + token } }
+    if (body) {
+      opt.headers['Content-Type'] = 'application/json'
+      opt.body = JSON.stringify(body)
+    }
+    return fetch(base + path, opt).then(function (res) {
+      return res.json().catch(function () { return null }).then(function (j) {
+        if (j && j.code === 0) return j
+        var msg = (j && j.msg) || ('请求失败（HTTP ' + res.status + '）')
+        if (res.status === 401) msg = 'token 无效或已过期，重新签一个贴进「连接设置」'
+        throw new Error(msg)
+      })
+    }, function () {
+      throw new Error('连不上服务器：检查接口地址、网络，以及服务器是否放行了跨域（CORS）')
+    })
+  }
+
+  // 列表接口每页最多 100 条：一页页拉完再合起来，页面上不分页
+  function fetchAllOrders() {
+    var all = []
+    function page(n) {
+      return api('GET', '/api/orders?page_size=100&page=' + n).then(function (j) {
+        var d = j.data || {}
+        all = all.concat(d.list || [])
+        if ((d.list || []).length === 100 && all.length < (d.total || 0)) return page(n + 1)
+        return all
+      })
+    }
+    return page(1)
+  }
+
+  // ---------- 列表 ----------
+
+  function refreshConn() {
+    var base = load(LS_BASE), token = load(LS_TOKEN), el = $('conn')
+    if (!base || !token) { el.innerHTML = '<span class="bad">未连接</span>'; return }
+    var exp = tokenExp(token), now = Date.now() / 1000
+    var expText = ''
+    if (exp) {
+      var d = new Date(exp * 1000)
+      expText = exp < now
+        ? '　<span class="bad">token 已过期</span>'
+        : '　token 有效至 ' + (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+    }
+    el.innerHTML = '<b>' + esc(base) + '</b>' + expText
+  }
+
+  function reload() {
+    $('listErr').textContent = ''
+    $('reload').disabled = true
+    return Promise.all([fetchAllOrders(), api('GET', '/api/specs')]).then(function (r) {
+      orders = r[0]
+      specs = (r[1].data && r[1].data.list) || []
+      render()
+    }).catch(function (e) {
+      $('listErr').textContent = e.message
+    }).then(function () { $('reload').disabled = false })
+  }
+
+  function matches(o, q) {
+    if (!q) return true
+    var hay = [o.order_no, o.receiver_name, o.phone, o.wechat_nick, o.wechat_remark,
+      o.address, o.tracking_no, o.items_summary, o.remark].join(' ').toLowerCase()
+    return hay.indexOf(q) >= 0
+  }
+
+  function tagClass(kind, v) {
+    if (kind === 'ship') return v === 'pending' ? 'pending' : v === 'shipped' ? 'shipped' : 'muted'
+    return v === 'paid' ? 'muted' : v
+  }
+
+  function render() {
+    var q = $('q').value.trim().toLowerCase(), fs = $('fShip').value, fp = $('fPay').value
+    var list = orders.filter(function (o) {
+      return (!fs || o.ship_status === fs) && (!fp || o.pay_status === fp) && matches(o, q)
+    })
+
+    var payable = 0, paid = 0, crabs = 0
+    list.forEach(function (o) { payable += o.payable_amount; paid += o.paid_amount; crabs += o.crab_count || 0 })
+    $('sum').innerHTML = '共 <b>' + list.length + '</b> 单' + (list.length !== orders.length ? '（全部 ' + orders.length + ' 单）' : '') +
+      '　应收 <b>' + yuan(payable) + '</b>　已收 <b>' + yuan(paid) + '</b>' +
+      (payable - paid > 0 ? '　未收 <b style="color:var(--boiled)">' + yuan(payable - paid) + '</b>' : '') +
+      '　共 <b>' + crabs + '</b> 只'
+
+    if (!list.length) {
+      $('rows').innerHTML = '<tr><td colspan="13" class="empty">' + (orders.length ? '没有符合条件的订单' : '还没有订单') + '</td></tr>'
+      return
+    }
+    $('rows').innerHTML = list.map(function (o) {
+      var wx = [o.wechat_nick, o.wechat_remark].filter(Boolean).join(' / ')
+      var money = function (fen) { return '<span class="num">' + esc(yuan(fen)) + '</span>' }
+      return '<tr data-id="' + o.id + '"' + (o.order_no === highlight ? ' class="new"' : '') + ' title="点开看详情、更新状态">' +
+        '<td class="nowrap num">' + esc(o.order_no) + '</td>' +
+        '<td class="nowrap num">' + esc(day(o.created_at)) + '</td>' +
+        '<td class="nowrap">' + esc(o.receiver_name) + '<span class="sub num">' + esc(o.phone) + '</span></td>' +
+        '<td class="addr">' + esc(o.address) + '</td>' +
+        '<td>' + esc(wx) + '</td>' +
+        '<td class="items">' + esc(o.items_summary) + '</td>' +
+        '<td class="r num">' + (o.crab_count || 0) + '</td>' +
+        '<td class="r">' + money(o.payable_amount) +
+          (o.freight_fee ? '<span class="sub">含运费 ' + esc(yuan(o.freight_fee)) + '</span>' : '') + '</td>' +
+        '<td class="r">' + money(o.paid_amount) + '</td>' +
+        '<td><span class="tag ' + tagClass('ship', o.ship_status) + '">' + esc(o.ship_status_text) + '</span></td>' +
+        '<td><span class="tag ' + tagClass('pay', o.pay_status) + '">' + esc(o.pay_status_text) + '</span></td>' +
+        '<td class="nowrap num">' + esc(o.tracking_no) + '</td>' +
+        '<td>' + esc(o.remark) + '</td>' +
+      '</tr>'
+    }).join('')
+  }
+
+  // ---------- 录入弹窗 ----------
+
+  function specOptions(selected) {
+    return specs.map(function (s) {
+      var hint = s.pack_hint_amount != null ? s.pack_hint_amount : lineAmount(PACK_HINT, s.unit_price_milli)
+      return '<option value="' + s.id + '"' + (String(s.id) === String(selected) ? ' selected' : '') + '>' +
+        esc(s.title) + '　' + PACK_HINT + '只' + esc(yuan(hint)) + '</option>'
+    }).join('')
+  }
+
+  function specById(id) {
+    for (var i = 0; i < specs.length; i++) if (String(specs[i].id) === String(id)) return specs[i]
+    return null
+  }
+
+  function addItemRow(specId) {
+    var sp = specById(specId) || specs[0]
+    if (!sp) { $('formErr').textContent = '价目表是空的，先在小程序「设置」里加规格'; return }
+    var tr = document.createElement('tr')
+    tr.innerHTML =
+      '<td><select class="s">' + specOptions(sp.id) + '</select></td>' +
+      '<td class="qc"><input class="q num" inputmode="numeric" value="' + PACK_HINT + '" aria-label="只数"></td>' +
+      '<td class="pc"><input class="p num" inputmode="decimal" value="' + milliText(sp.unit_price_milli) + '" aria-label="单只价"></td>' +
+      '<td class="amt"></td>' +
+      '<td class="del"><button type="button" class="x" aria-label="删掉这一行">×</button></td>'
+    tr.querySelector('.s').addEventListener('change', function () {
+      var s = specById(this.value)
+      if (s) tr.querySelector('.p').value = milliText(s.unit_price_milli)
+      recalc()
+    })
+    tr.querySelector('.q').addEventListener('input', recalc)
+    tr.querySelector('.p').addEventListener('input', recalc)
+    tr.querySelector('.x').addEventListener('click', function () { tr.remove(); recalc() })
+    $('itemRows').appendChild(tr)
+    recalc()
+  }
+
+  // 读表单里的明细；有问题返回 {error}
+  function readItems() {
+    var rows = $('itemRows').querySelectorAll('tr'), out = []
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i], sp = specById(tr.querySelector('.s').value)
+      var qty = parseInt(tr.querySelector('.q').value, 10)
+      var milli = parseUnits(tr.querySelector('.p').value, 3)
+      var amtEl = tr.querySelector('.amt')
+      if (!sp) return { error: '第 ' + (i + 1) + ' 行没选规格' }
+      if (!(qty >= 1)) { amtEl.textContent = '—'; return { error: '第 ' + (i + 1) + ' 行只数要大于 0' } }
+      if (milli == null) { amtEl.textContent = '—'; return { error: '第 ' + (i + 1) + ' 行单只价最多三位小数' } }
+      amtEl.textContent = yuan(lineAmount(qty, milli))
+      out.push({
+        gender: sp.gender, spec_gram: sp.spec_gram, grade: sp.grade, spec_label: sp.spec_label,
+        quantity: qty, unit_price_milli: milli
+      })
+    }
+    return { items: out }
+  }
+
+  function recalc() {
+    var r = readItems()
+    var goods = 0
+    ;(r.items || []).forEach(function (it) { goods += lineAmount(it.quantity, it.unit_price_milli) })
+    var fee = parseUnits($('fFee').value, 2) || 0, disc = parseUnits($('fDisc').value, 2) || 0
+    $('tGoods').textContent = yuan(goods)
+    $('tPayable').textContent = yuan(goods + fee - disc)
+    return r
+  }
+
+  function openForm() {
+    if (!specs.length) { $('listErr').textContent = '还没拿到价目表：先确认连接正常，点一下「刷新」'; return }
+    ;['fName', 'fPhone', 'fAddr', 'fNick', 'fRemarkName', 'fFee', 'fDisc', 'fPaid', 'fDate', 'fRemark']
+      .forEach(function (id) { $(id).value = '' })
+    $('fMethod').value = 'wechat'
+    $('itemRows').innerHTML = ''
+    $('formErr').textContent = ''
+    // 默认给第二个母蟹档放 8 只（主推那档），和买家登记页一样
+    var females = specs.filter(function (s) { return s.gender === 'female' })
+    addItemRow((females[1] || females[0] || specs[0]).id)
+    requestId = 'admin-' + Date.now() + '-' + Math.floor(Math.random() * 1e6)
+    $('mask').className = 'mask on'
+    $('fName').focus()
+  }
+
+  function closeForm() { $('mask').className = 'mask' }
+
+  function submit() {
+    var err = $('formErr')
+    err.textContent = ''
+    var name = $('fName').value.trim(), phone = $('fPhone').value.trim(), addr = $('fAddr').value.trim()
+    if (!name) { err.textContent = '收货人还没填'; return }
+    if (!/^1[3-9]\d{9}$/.test(phone)) { err.textContent = '手机号看着不对'; return }
+    if (addr.length < 5) { err.textContent = '地址写详细一点'; return }
+    var r = recalc()
+    if (r.error) { err.textContent = r.error; return }
+    if (!r.items.length) { err.textContent = '至少加一种蟹'; return }
+    var fee = parseUnits($('fFee').value, 2), disc = parseUnits($('fDisc').value, 2), paid = parseUnits($('fPaid').value, 2)
+    if (fee == null || disc == null || paid == null) { err.textContent = '金额最多两位小数'; return }
+
+    var body = {
+      request_id: requestId,
+      receiver_name: name, phone: phone, address: addr,
+      wechat_nick: $('fNick').value.trim(), wechat_remark: $('fRemarkName').value.trim(),
+      items: r.items, freight_fee: fee, discount: disc,
+      expect_ship_date: $('fDate').value || '', remark: $('fRemark').value.trim()
+    }
+    $('submit').disabled = true
+    $('submit').textContent = '保存中'
+    api('POST', '/api/orders', body).then(function (j) {
+      var o = j.data
+      // 重复提交命中幂等时，已经记过的收款不再记第二次
+      if (paid > 0 && !(o.paid_amount > 0)) {
+        return api('POST', '/api/orders/' + o.id + '/payments', {
+          amount: paid, pay_method: $('fMethod').value, remark: '录入时记的收款'
+        }).then(function () { return o })
+      }
+      return o
+    }).then(function (o) {
+      highlight = o.order_no
+      requestId = ''
+      closeForm()
+      return reload()
+    }).catch(function (e) {
+      err.textContent = e.message
+    }).then(function () {
+      $('submit').disabled = false
+      $('submit').textContent = '保存'
+    })
+  }
+
+  // ---------- 详情与状态更新 ----------
+
+  var cur = null      // 当前打开的订单（完整详情）
+  var curAction = null
+
+  function nowLocal() {
+    var d = new Date(), p = function (n) { return String(n).padStart(2, '0') }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes())
+  }
+
+  // <input type=datetime-local> 的值是本机时间，转成后端认的 RFC3339
+  function toRFC3339(v) {
+    if (!v) return undefined
+    var d = new Date(v)
+    return isNaN(d.getTime()) ? null : d.toISOString()
+  }
+
+  // 收款金额可以是负数（退款）
+  function parseSigned(s) {
+    s = String(s == null ? '' : s).trim()
+    var neg = s.charAt(0) === '-'
+    var v = parseUnits(neg ? s.slice(1) : s, 2)
+    return v == null ? null : (neg ? -v : v)
+  }
+
+  // 买家补运费的建议值：实付超过卖家补贴的部分，和后端「按实付」口径同一个规则
+  function suggestFee(o, costFen) {
+    return Math.max(0, (costFen || 0) - (o.freight_seller_cap || 0))
+  }
+
+  function freightFields(o) {
+    return [
+      { id: 'list', label: '快递原价（元，可不填）', type: 'money' },
+      { id: 'cost', label: '实付运费（元，用券后）', type: 'money' },
+      { id: 'fee', label: '买家补运费（元，空着按规则算）', type: 'money',
+        hint: function (v) {
+          var cap = '这单 ' + (o.crab_count || 0) + ' 只，你最多补 ' + yuan(o.freight_seller_cap || 0)
+          var cost = parseUnits(v.cost, 2)
+          if (String(v.cost || '').trim() === '' || cost == null) return cap
+          return '按规则买家补 ' + yuan(suggestFee(o, cost)) + '（' + cap + '）'
+        } }
+    ]
+  }
+
+  // 运费三个数 → 后端的 freight 块。实付没填就返回 undefined（不填运费）。
+  function freightBody(v, required) {
+    var cost = parseUnits(v.cost, 2), list = parseUnits(v.list, 2), fee = parseUnits(v.fee, 2)
+    if (cost == null || list == null || fee == null) throw new Error('运费最多两位小数')
+    if (String(v.cost).trim() === '') {
+      if (required) throw new Error('实付运费要填')
+      return undefined
+    }
+    var b = { freight_cost: cost, freight_basis: 'actual' }
+    if (String(v.list).trim() !== '') b.freight_list = list
+    if (String(v.fee).trim() !== '') b.freight_fee = fee
+    return b
+  }
+
+  // 每个动作：什么状态下出现、要填什么、怎么调接口。只放后端状态机允许的那几种。
+  var ACTIONS = [
+    { key: 'ship', label: '发货', show: function (o) { return o.ship_status === 'pending' },
+      fields: function (o) {
+        return [
+          { id: 'company', label: '快递公司', type: 'text', value: o.ship_company || '顺丰' },
+          { id: 'tracking', label: '运单号', type: 'text', value: o.tracking_no || '' },
+          { id: 'time', label: '发货时间', type: 'datetime', value: nowLocal() }
+        ].concat(freightFields(o))
+      },
+      run: function (o, v) {
+        if (!v.company.trim()) throw new Error('快递公司要填')
+        if (!v.tracking.trim()) throw new Error('运单号要填')
+        var body = { ship_company: v.company.trim(), tracking_no: v.tracking.trim(), ship_time: toRFC3339(v.time) }
+        if (body.ship_time === null) throw new Error('发货时间不对')
+        var fr = freightBody(v, false)
+        if (fr) body.freight = fr
+        return api('POST', '/api/orders/' + o.id + '/ship', body)
+      } },
+    { key: 'receive', label: '标记签收', show: function (o) { return o.ship_status === 'shipped' },
+      fields: function () { return [{ id: 'time', label: '签收时间', type: 'datetime', value: nowLocal() }] },
+      run: function (o, v) {
+        var t = toRFC3339(v.time)
+        if (t === null) throw new Error('签收时间不对')
+        return api('POST', '/api/orders/' + o.id + '/receive', { receive_time: t })
+      } },
+    { key: 'pay', label: '记收款', show: function (o) { return o.ship_status !== 'cancelled' },
+      fields: function (o) {
+        return [
+          { id: 'amount', label: '金额（元，退款写负数）', type: 'money',
+            value: o.unpaid_amount > 0 ? (o.unpaid_amount / 100).toFixed(2).replace(/\.00$/, '') : '' },
+          { id: 'method', label: '收款方式', type: 'select', value: 'wechat',
+            options: [['wechat', '微信'], ['alipay', '支付宝'], ['cash', '现金'], ['transfer', '银行转账'], ['other', '其他']] },
+          { id: 'time', label: '收款时间', type: 'datetime', value: nowLocal() },
+          { id: 'remark', label: '备注（可不填）', type: 'text', value: '' }
+        ]
+      },
+      run: function (o, v) {
+        var amt = parseSigned(v.amount)
+        if (amt == null) throw new Error('金额最多两位小数')
+        if (!amt) throw new Error('金额不能是 0')
+        var t = toRFC3339(v.time)
+        if (t === null) throw new Error('收款时间不对')
+        return api('POST', '/api/orders/' + o.id + '/payments',
+          { amount: amt, pay_method: v.method, paid_at: t, remark: v.remark.trim() })
+      } },
+    { key: 'freight', label: function (o) { return o.freight_pending ? '填运费' : '改运费' },
+      // 没发货时一般在「发货」里顺手填；已经填过的随时能改
+      show: function (o) { return o.ship_status !== 'cancelled' && (o.ship_status !== 'pending' || !o.freight_pending) },
+      fields: function (o) {
+        var f = freightFields(o)
+        f[0].value = o.freight_list != null ? String(o.freight_list / 100) : ''
+        f[1].value = o.freight_cost != null ? String(o.freight_cost / 100) : ''
+        f[2].value = o.freight_pending ? '' : String(o.freight_fee / 100)
+        return f
+      },
+      run: function (o, v) { return api('PUT', '/api/orders/' + o.id + '/freight', freightBody(v, true)) } },
+    { key: 'settle', label: function (o) { return o.freight_settled_at ? '撤销运费已结' : '运费已和快递结清' },
+      show: function (o) { return !o.freight_pending && o.ship_status !== 'cancelled' },
+      fields: function () { return [] },
+      run: function (o) {
+        return api('POST', '/api/orders/freight-settle', { ids: [o.id], settled: !o.freight_settled_at })
+      } },
+    { key: 'cancel', label: '取消订单', warn: true,
+      show: function (o) { return o.ship_status === 'pending' || o.ship_status === 'shipped' },
+      fields: function () { return [{ id: 'reason', label: '原因（可不填）', type: 'text', value: '' }] },
+      run: function (o, v) { return api('POST', '/api/orders/' + o.id + '/cancel', { reason: v.reason.trim() }) } },
+    { key: 'revert', warn: true,
+      label: function (o) { return { shipped: '撤回发货', received: '撤回签收', cancelled: '恢复订单' }[o.ship_status] },
+      show: function (o) { return o.ship_status === 'shipped' || o.ship_status === 'received' || o.ship_status === 'cancelled' },
+      fields: function () { return [{ id: 'reason', label: '原因（必填，会记进操作流水）', type: 'text', value: '' }] },
+      run: function (o, v) {
+        if (!v.reason.trim()) throw new Error('写一下原因')
+        var to = { shipped: 'pending', received: 'shipped', cancelled: 'pending' }[o.ship_status]
+        return api('POST', '/api/orders/' + o.id + '/revert-ship', { to: to, reason: v.reason.trim() })
+      } }
+  ]
+
+  function labelOf(a, o) { return typeof a.label === 'function' ? a.label(o) : a.label }
+
+  function openDetail(id) {
+    cur = null
+    $('dTitle').textContent = '订单'
+    $('dTags').innerHTML = ''
+    $('dBody').innerHTML = '<div class="empty">加载中…</div>'
+    $('dOps').innerHTML = ''
+    $('dOk').textContent = ''
+    closePanel()
+    $('dMask').className = 'mask on'
+    loadDetail(id)
+  }
+
+  function loadDetail(id) {
+    return api('GET', '/api/orders/' + id).then(function (j) {
+      cur = j.data
+      renderDetail()
+    }).catch(function (e) {
+      $('dBody').innerHTML = '<div class="err">' + esc(e.message) + '</div>'
+    })
+  }
+
+  function renderDetail() {
+    var o = cur
+    $('dTitle').textContent = o.order_no
+    $('dTags').innerHTML =
+      '<span class="tag ' + tagClass('ship', o.ship_status) + '">' + esc(o.ship_status_text) + '</span> ' +
+      '<span class="tag ' + tagClass('pay', o.pay_status) + '">' + esc(o.pay_status_text) + '</span>'
+
+    var items = (o.items || []).map(function (it) {
+      return '<tr><td>' + esc(it.title) + '</td><td class="r">×' + it.quantity + '</td>' +
+        '<td class="r">¥' + esc(it.unit_price_yuan) + '/只</td><td class="r">' + esc(yuan(it.amount)) + '</td></tr>'
+    }).join('')
+    var money = '货款 ' + yuan(o.goods_amount) +
+      (o.freight_fee ? '　补运费 ' + yuan(o.freight_fee) : '') +
+      (o.discount ? '　优惠 ' + yuan(o.discount) : '') +
+      '　<b>应收 ' + yuan(o.payable_amount) + '</b>　已收 ' + yuan(o.paid_amount) +
+      (o.unpaid_amount > 0 ? '　<span style="color:var(--boiled)">未收 ' + yuan(o.unpaid_amount) + '</span>' : '') +
+      (o.unpaid_amount < 0 ? '　多收 ' + yuan(-o.unpaid_amount) : '')
+    var ship = o.tracking_no
+      ? esc(o.ship_company + ' ' + o.tracking_no) + '<span class="sub">发货 ' + esc(day(o.ship_time)) +
+        (o.receive_time ? '　签收 ' + esc(day(o.receive_time)) : '') + '</span>'
+      : '还没发货'
+    var freight = o.freight_pending ? '还没填' :
+      '实付 ' + yuan(o.freight_cost) + (o.freight_list != null ? '　原价 ' + yuan(o.freight_list) : '') +
+      '　买家补 ' + yuan(o.freight_fee) + '　你贴 ' + yuan(o.freight_seller) +
+      (o.freight_settled_at ? '　已和快递结清' : '　未结')
+    var pays = (o.payments || []).length
+      ? '<ul class="pays">' + o.payments.map(function (p) {
+          return '<li><span class="t">' + esc(day(p.paid_at)) + '</span><span class="a">' + esc(yuan(p.amount)) + '</span>' +
+            '<span>' + esc(p.pay_method_text) + (p.remark ? ' · ' + esc(p.remark) : '') + '</span></li>'
+        }).join('') + '</ul>'
+      : '还没有'
+
+    $('dBody').innerHTML =
+      '<div class="kv">' +
+        '<span class="k">收件人</span><span class="v">' + esc(o.receiver_name) + '　' + esc(o.phone) + '</span>' +
+        '<span class="k">地址</span><span class="v">' + esc(o.address) + '</span>' +
+        '<span class="k">微信</span><span class="v">' + esc([o.wechat_nick, o.wechat_remark].filter(Boolean).join(' / ') || '—') + '</span>' +
+        '<span class="k">明细</span><span class="v"><table class="d-items"><tbody>' + items + '</tbody></table></span>' +
+        '<span class="k">金额</span><span class="v">' + money + '</span>' +
+        '<span class="k">收款</span><span class="v">' + pays + '</span>' +
+        '<span class="k">物流</span><span class="v">' + ship + '</span>' +
+        '<span class="k">运费</span><span class="v">' + freight + '</span>' +
+        (o.remark ? '<span class="k">备注</span><span class="v">' + esc(o.remark) + '</span>' : '') +
+      '</div>'
+
+    $('dOps').innerHTML = ''
+    ACTIONS.forEach(function (a) {
+      if (!a.show(o)) return
+      var b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'btn' + (a.warn ? ' warn' : '') + (curAction === a ? ' on' : '')
+      b.textContent = labelOf(a, o)
+      b.addEventListener('click', function () { openPanel(a) })
+      $('dOps').appendChild(b)
+    })
+  }
+
+  function openPanel(a) {
+    curAction = a
+    $('dOk').textContent = ''
+    $('dErr').textContent = ''
+    var fields = a.fields(cur)
+    $('dFields').innerHTML = fields.map(function (f) {
+      var input
+      if (f.type === 'select') {
+        input = '<select data-f="' + f.id + '">' + f.options.map(function (op) {
+          return '<option value="' + op[0] + '"' + (op[0] === f.value ? ' selected' : '') + '>' + esc(op[1]) + '</option>'
+        }).join('') + '</select>'
+      } else {
+        input = '<input data-f="' + f.id + '"' +
+          (f.type === 'datetime' ? ' type="datetime-local"' : '') +
+          (f.type === 'money' ? ' class="num" inputmode="decimal"' : '') +
+          ' value="' + esc(f.value || '') + '">'
+      }
+      return '<div><label>' + esc(f.label) + '</label>' + input +
+        (f.hint ? '<div class="hint" data-hint="' + f.id + '"></div>' : '') + '</div>'
+    }).join('')
+    if (!fields.length) {
+      $('dFields').innerHTML = '<div class="full hint">' + esc(labelOf(a, cur)) + '？</div>'
+    }
+    var refreshHints = function () {
+      var v = panelValues()
+      fields.forEach(function (f) {
+        if (f.hint) $('dFields').querySelector('[data-hint="' + f.id + '"]').textContent = f.hint(v)
+      })
+    }
+    $('dFields').querySelectorAll('[data-f]').forEach(function (el) { el.addEventListener('input', refreshHints) })
+    refreshHints()
+    $('dPanelGo').textContent = labelOf(a, cur)
+    $('dPanel').className = 'panel on'
+    renderDetail()
+    var first = $('dFields').querySelector('input,select')
+    if (first) first.focus()
+  }
+
+  function closePanel() {
+    curAction = null
+    $('dPanel').className = 'panel'
+    $('dFields').innerHTML = ''
+    $('dErr').textContent = ''
+    if (cur) renderDetail()
+  }
+
+  function panelValues() {
+    var v = {}
+    $('dFields').querySelectorAll('[data-f]').forEach(function (el) { v[el.getAttribute('data-f')] = el.value })
+    return v
+  }
+
+  function runAction() {
+    var a = curAction
+    if (!a || !cur) return
+    $('dErr').textContent = ''
+    var p
+    try { p = a.run(cur, panelValues()) } catch (e) { $('dErr').textContent = e.message; return }
+    $('dPanelGo').disabled = true
+    var label = labelOf(a, cur)
+    p.then(function () {
+      highlight = cur.order_no
+      closePanel()
+      $('dOk').textContent = '完成：' + label
+      return Promise.all([loadDetail(cur.id), reload()])
+    }).catch(function (e) {
+      $('dErr').textContent = e.message
+    }).then(function () { $('dPanelGo').disabled = false })
+  }
+
+  function closeDetail() { $('dMask').className = 'mask'; cur = null; closePanel() }
+
+  // ---------- 起手 ----------
+
+  $('base').value = load(LS_BASE)
+  $('token').value = load(LS_TOKEN)
+  if (!load(LS_BASE) || !load(LS_TOKEN)) $('settings').className = 'card settings on'
+
+  $('toggleSettings').addEventListener('click', function () {
+    var s = $('settings')
+    s.className = s.className.indexOf(' on') >= 0 ? 'card settings' : 'card settings on'
+  })
+  $('saveConn').addEventListener('click', function () {
+    store(LS_BASE, $('base').value.trim().replace(/\/+$/, '') || null)
+    store(LS_TOKEN, $('token').value.trim() || null)
+    refreshConn()
+    $('settings').className = 'card settings'
+    reload()
+  })
+  $('reload').addEventListener('click', reload)
+  $('q').addEventListener('input', render)
+  $('fShip').addEventListener('change', render)
+  $('fPay').addEventListener('change', render)
+  $('openNew').addEventListener('click', openForm)
+  $('addItem').addEventListener('click', function () { addItemRow() })
+  $('cancel').addEventListener('click', closeForm)
+  $('submit').addEventListener('click', submit)
+  $('fFee').addEventListener('input', recalc)
+  $('fDisc').addEventListener('input', recalc)
+  $('mask').addEventListener('click', function (e) { if (e.target === this) closeForm() })
+  $('rows').addEventListener('click', function (e) {
+    var tr = e.target.closest('tr[data-id]')
+    if (tr) openDetail(tr.getAttribute('data-id'))
+  })
+  $('dClose').addEventListener('click', closeDetail)
+  $('dMask').addEventListener('click', function (e) { if (e.target === this) closeDetail() })
+  $('dPanelCancel').addEventListener('click', closePanel)
+  $('dPanelGo').addEventListener('click', runAction)
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return
+    if ($('dMask').className.indexOf(' on') >= 0) closeDetail(); else closeForm()
+  })
+
+  refreshConn()
+  if (load(LS_BASE) && load(LS_TOKEN)) reload()
+})()
+</script>
+</body>
+</html>
