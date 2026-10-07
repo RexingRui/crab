@@ -10,6 +10,7 @@ import (
 
 	"crab-order/internal/auth"
 	"crab-order/internal/errs"
+	"crab-order/internal/model"
 	"crab-order/internal/service"
 )
 
@@ -46,7 +47,7 @@ func (e *testEnv) publicSpecIDs(t *testing.T) []PublicSpecDTO {
 	return out.List
 }
 
-// registerBody 的 quantity 是**只数**，不是盒数：8 只装的档填 8 就是一盒。
+// registerBody 的 quantity 是只数。
 func registerBody(token string, specID int64, quantity int, phone string) map[string]any {
 	return map[string]any{
 		"token":         token,
@@ -72,7 +73,7 @@ func TestRegistrationFlow(t *testing.T) {
 	specs := e.publicSpecIDs(t)
 	sp := specs[0]
 
-	status, resp, data := e.register(t, registerBody(token, sp.ID, 2*sp.PackSize, "13900139001"))
+	status, resp, data := e.register(t, registerBody(token, sp.ID, 16, "13900139001"))
 	if status != http.StatusOK || resp.Code != errs.CodeOK {
 		t.Fatalf("登记失败: status=%d code=%d msg=%s", status, resp.Code, resp.Msg)
 	}
@@ -80,8 +81,8 @@ func TestRegistrationFlow(t *testing.T) {
 	if err := json.Unmarshal(data, &reg); err != nil {
 		t.Fatalf("解析回执失败: %v", err)
 	}
-	// 金额由服务端按 specs 当前价算，回执里的应收要对得上。
-	if want := sp.UnitPrice * 2; reg.PayableAmount != want {
+	// 金额由服务端按 specs 当前价算，回执里的应收要对得上：16 只正好是两个「8 只价」。
+	if want := 2 * sp.PackHintAmount; reg.PayableAmount != want {
 		t.Fatalf("应收算错: got=%d want=%d", reg.PayableAmount, want)
 	}
 	if reg.Idempotent {
@@ -99,8 +100,35 @@ func TestRegistrationFlow(t *testing.T) {
 	if o.ShipStatus != "pending" || o.PayStatus != "unpaid" {
 		t.Fatalf("初始状态错: ship=%s pay=%s", o.ShipStatus, o.PayStatus)
 	}
-	if o.PayableAmount != sp.UnitPrice*2 {
-		t.Fatalf("落库应收算错: %d", o.PayableAmount)
+	if o.PayableAmount != 2*sp.PackHintAmount || o.CrabCount != 16 {
+		t.Fatalf("落库应收或只数错: payable=%d crabs=%d", o.PayableAmount, o.CrabCount)
+	}
+	if len(o.Items) != 1 || o.Items[0].Quantity != 16 || o.Items[0].Gender != sp.Gender {
+		t.Fatalf("一档该落成一行按只记的明细: %+v", o.Items)
+	}
+}
+
+// TestPublicSpecsPackHint 页面上「8 只 = xx 元」的那个价由后端给，种子档 8 只正好是整盒价。
+func TestPublicSpecsPackHint(t *testing.T) {
+	e := newTestEnv(t)
+	status, resp, data := e.callWithToken(t, http.MethodGet, "/api/public/specs", nil, "")
+	if status != http.StatusOK || resp.Code != errs.CodeOK {
+		t.Fatalf("公开价目表失败: code=%d", resp.Code)
+	}
+	var out struct {
+		List        []PublicSpecDTO `json:"list"`
+		MinQuantity int             `json:"min_quantity"`
+		PackHint    int             `json:"pack_hint"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if out.PackHint != PackHint || out.MinQuantity != service.RegMinCrabs {
+		t.Fatalf("pack_hint=%d min_quantity=%d", out.PackHint, out.MinQuantity)
+	}
+	sp := out.List[0]
+	if sp.Title != "母2.5两" || sp.UnitPriceYuan != "23.625" || sp.PackHintAmountYuan != "189.00" {
+		t.Fatalf("第一档展示字段不对: %+v", sp)
 	}
 }
 
@@ -112,9 +140,10 @@ func TestRegistrationIgnoresClientPrice(t *testing.T) {
 	token := e.regLink(t, "")
 	sp := e.publicSpecIDs(t)[0]
 
-	body := registerBody(token, sp.ID, sp.PackSize, "13900139002")
+	body := registerBody(token, sp.ID, PackHint, "13900139002")
 	// 往请求里塞满各种降价字段，全都该被无视。
-	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": sp.PackSize, "unit_price": 1, "amount": 1}}
+	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": PackHint,
+		"unit_price": 1, "unit_price_milli": 1, "amount": 1, "grade": "broken", "gender": "male"}}
 	body["freight_fee"] = -10000
 	body["discount"] = 999999
 	body["goods_amount"] = 1
@@ -128,7 +157,7 @@ func TestRegistrationIgnoresClientPrice(t *testing.T) {
 	if err := json.Unmarshal(data, &reg); err != nil {
 		t.Fatalf("解析回执失败: %v", err)
 	}
-	if want := sp.UnitPrice; reg.PayableAmount != want {
+	if want := sp.PackHintAmount; reg.PayableAmount != want {
 		t.Fatalf("买家改价生效了: got=%d want=%d", reg.PayableAmount, want)
 	}
 
@@ -136,8 +165,9 @@ func TestRegistrationIgnoresClientPrice(t *testing.T) {
 	if o.FreightFee != 0 || o.Discount != 0 {
 		t.Fatalf("运费/优惠被买家写进去了: freight=%d discount=%d", o.FreightFee, o.Discount)
 	}
-	if o.Items[0].UnitPrice != sp.UnitPrice {
-		t.Fatalf("单价快照被买家改了: %d", o.Items[0].UnitPrice)
+	it := o.Items[0]
+	if it.UnitPriceMilli != sp.UnitPriceMilli || it.Grade != sp.Grade || it.Gender != sp.Gender {
+		t.Fatalf("明细快照被买家改了: %+v", it)
 	}
 }
 
@@ -148,7 +178,7 @@ func TestRegistrationSameLinkIsIdempotent(t *testing.T) {
 
 	token := e.regLink(t, "")
 	sp := e.publicSpecIDs(t)[0]
-	body := registerBody(token, sp.ID, sp.PackSize, "13900139003")
+	body := registerBody(token, sp.ID, PackHint, "13900139003")
 
 	_, _, first := e.register(t, body)
 	var one RegistrationDTO
@@ -158,7 +188,7 @@ func TestRegistrationSameLinkIsIdempotent(t *testing.T) {
 
 	// 换个收货人和数量再提交一次，仍然应该拿回第一笔单。
 	body["receiver_name"] = "王五"
-	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": 3 * sp.PackSize}}
+	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": 3 * PackHint}}
 	status, resp, second := e.register(t, body)
 	if status != http.StatusOK || resp.Code != errs.CodeOK {
 		t.Fatalf("重复提交不该报错: status=%d code=%d msg=%s", status, resp.Code, resp.Msg)
@@ -188,7 +218,7 @@ func TestRegistrationAfterSellerDeleted(t *testing.T) {
 
 	token := e.regLink(t, "")
 	sp := e.publicSpecIDs(t)[0]
-	body := registerBody(token, sp.ID, sp.PackSize, "13900139020")
+	body := registerBody(token, sp.ID, PackHint, "13900139020")
 
 	_, _, data := e.register(t, body)
 	var reg RegistrationDTO
@@ -207,89 +237,45 @@ func TestRegistrationAfterSellerDeleted(t *testing.T) {
 	}
 }
 
-// TestRegistrationPackRatio 套餐的公母比例：买家能调，价格不跟着变，比例写进明细快照。
-func TestRegistrationPackRatio(t *testing.T) {
-	e := newTestEnv(t)
-
-	sp := e.publicSpecIDs(t)[0]
-	if sp.PackSize != 8 {
-		t.Fatalf("种子档应是 8 只装，实际 %d", sp.PackSize)
-	}
-
-	body := registerBody(e.regLink(t, ""), sp.ID, 2*sp.PackSize, "13900139010")
-	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": 2 * sp.PackSize, "male_count": 12}}
-
-	status, resp, data := e.register(t, body)
-	if status != http.StatusOK || resp.Code != errs.CodeOK {
-		t.Fatalf("登记失败: status=%d code=%d msg=%s", status, resp.Code, resp.Msg)
-	}
-	var reg RegistrationDTO
-	if err := json.Unmarshal(data, &reg); err != nil {
-		t.Fatalf("解析回执失败: %v", err)
-	}
-	// 一盒就是一盒的价，比例怎么调都不影响金额
-	if want := sp.UnitPrice * 2; reg.PayableAmount != want {
-		t.Fatalf("比例改动影响了金额: got=%d want=%d", reg.PayableAmount, want)
-	}
-
-	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
-	if !strings.Contains(o.Items[0].SpecLabel, "公12母4") {
-		t.Fatalf("比例没写进快照: %q", o.Items[0].SpecLabel)
-	}
-	if o.Items[0].Unit != "box" || o.Items[0].Quantity != 2 {
-		t.Fatalf("套餐该按盒记: unit=%s qty=%d", o.Items[0].Unit, o.Items[0].Quantity)
-	}
-}
-
-// TestRegistrationPackRatioDefaults 不传比例就是一半一半，传越界的直接拒。
-func TestRegistrationPackRatioDefaults(t *testing.T) {
+// TestRegistrationLooseCeil 散买不加价，只是零头向上取整到元：5 只 × 23.625 = 118.125 → 119。
+func TestRegistrationLooseCeil(t *testing.T) {
 	e := newTestEnv(t)
 	sp := e.publicSpecIDs(t)[0]
 
-	// 不传 male_count → 默认 4 公 4 母
-	body := registerBody(e.regLink(t, ""), sp.ID, sp.PackSize, "13900139011")
-	_, resp, data := e.register(t, body)
+	_, resp, data := e.register(t, registerBody(e.regLink(t, ""), sp.ID, 5, "13900139030"))
 	if resp.Code != errs.CodeOK {
-		t.Fatalf("登记失败: code=%d msg=%s", resp.Code, resp.Msg)
+		t.Fatalf("5 只该放行: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	var reg RegistrationDTO
 	_ = json.Unmarshal(data, &reg)
-	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
-	if !strings.Contains(o.Items[0].SpecLabel, "公4母4") {
-		t.Fatalf("默认比例不对: %q", o.Items[0].SpecLabel)
+	if reg.PayableAmount != 11900 || reg.PayableAmount != model.LineAmount(5, sp.UnitPriceMilli) {
+		t.Fatalf("5 只的金额算错: %d", reg.PayableAmount)
 	}
 
-	// male_count=0 是合法的（整盒都要母的），要和「没传」区分开
-	body = registerBody(e.regLink(t, ""), sp.ID, sp.PackSize, "13900139012")
-	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": sp.PackSize, "male_count": 0}}
-	_, resp, data = e.register(t, body)
+	// 13 只 = 8 只的价 + 5 只的价向上取整，不再拆成整盒 + 散只两行
+	_, resp, data = e.register(t, registerBody(e.regLink(t, ""), sp.ID, 13, "13900139033"))
 	if resp.Code != errs.CodeOK {
-		t.Fatalf("male_count=0 该放行: code=%d msg=%s", resp.Code, resp.Msg)
+		t.Fatalf("13 只该放行: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	_ = json.Unmarshal(data, &reg)
-	o = decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
-	if !strings.Contains(o.Items[0].SpecLabel, "公0母8") {
-		t.Fatalf("male_count=0 没生效: %q", o.Items[0].SpecLabel)
+	if want := model.LineAmount(13, sp.UnitPriceMilli); reg.PayableAmount != want {
+		t.Fatalf("13 只的金额算错: got=%d want=%d", reg.PayableAmount, want)
 	}
-
-	// 超过一盒的只数 → 40001
-	body = registerBody(e.regLink(t, ""), sp.ID, sp.PackSize, "13900139013")
-	body["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": sp.PackSize, "male_count": sp.PackSize + 1}}
-	status, resp, _ := e.register(t, body)
-	if resp.Code != errs.CodeInvalidParam {
-		t.Fatalf("越界的比例该被拒: status=%d code=%d", status, resp.Code)
+	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
+	if len(o.Items) != 1 || o.Items[0].Quantity != 13 {
+		t.Fatalf("一档该是一行: %+v", o.Items)
 	}
 }
 
-// TestRegistrationMixesPacks 自由搭配：一次登记混几档不同的套餐。
-func TestRegistrationMixesPacks(t *testing.T) {
+// TestRegistrationMixesSpecs 自由搭配：一次登记混几档不同的规格。
+func TestRegistrationMixesSpecs(t *testing.T) {
 	e := newTestEnv(t)
 	specs := e.publicSpecIDs(t)
 
-	body := registerBody(e.regLink(t, ""), specs[0].ID, specs[0].PackSize, "13900139014")
+	body := registerBody(e.regLink(t, ""), specs[0].ID, PackHint, "13900139014")
 	body["items"] = []map[string]any{
-		{"spec_id": specs[0].ID, "quantity": 2 * specs[0].PackSize, "male_count": 8},
-		{"spec_id": specs[2].ID, "quantity": specs[2].PackSize, "male_count": 8},
+		{"spec_id": specs[0].ID, "quantity": 16},
+		{"spec_id": specs[2].ID, "quantity": 8},
 	}
 	_, resp, data := e.register(t, body)
 	if resp.Code != errs.CodeOK {
@@ -297,49 +283,13 @@ func TestRegistrationMixesPacks(t *testing.T) {
 	}
 	var reg RegistrationDTO
 	_ = json.Unmarshal(data, &reg)
-	if want := specs[0].UnitPrice*2 + specs[2].UnitPrice; reg.PayableAmount != want {
+	if want := 2*specs[0].PackHintAmount + specs[2].PackHintAmount; reg.PayableAmount != want {
 		t.Fatalf("混档金额算错: got=%d want=%d", reg.PayableAmount, want)
 	}
 
 	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
 	if len(o.Items) != 2 {
 		t.Fatalf("该有两条明细，实际 %d", len(o.Items))
-	}
-}
-
-// TestRegistrationSplitsLoose 凑不满一盒的零头单独成一条明细，走散买价。
-// 这是「向上取整的单只价只在不按整盒买时才出现」那条规矩的落点。
-func TestRegistrationSplitsLoose(t *testing.T) {
-	e := newTestEnv(t)
-	sp := e.publicSpecIDs(t)[0]
-
-	// 一盒零 5 只
-	n := sp.PackSize + 5
-	body := registerBody(e.regLink(t, ""), sp.ID, n, "13900139030")
-	_, resp, data := e.register(t, body)
-	if resp.Code != errs.CodeOK {
-		t.Fatalf("一盒零 5 只该放行: code=%d msg=%s", resp.Code, resp.Msg)
-	}
-	var reg RegistrationDTO
-	_ = json.Unmarshal(data, &reg)
-
-	if want := sp.UnitPrice + 5*sp.LoosePrice; reg.PayableAmount != want {
-		t.Fatalf("整盒 + 散只的金额算错: got=%d want=%d", reg.PayableAmount, want)
-	}
-
-	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
-	if len(o.Items) != 2 {
-		t.Fatalf("该拆成两条明细，实际 %d 条", len(o.Items))
-	}
-	box, loose := o.Items[0], o.Items[1]
-	if box.Unit != "box" || box.Quantity != 1 || box.UnitPrice != sp.UnitPrice {
-		t.Errorf("整盒那条不对: %+v", box)
-	}
-	if loose.Unit != "piece" || loose.Quantity != 5 || loose.UnitPrice != sp.LoosePrice {
-		t.Errorf("散只那条不对: %+v", loose)
-	}
-	if !strings.Contains(loose.SpecLabel, "散只") {
-		t.Errorf("散只那条的快照该标出来: %q", loose.SpecLabel)
 	}
 }
 
@@ -360,7 +310,8 @@ func TestRegistrationMinIsWholeOrder(t *testing.T) {
 	}
 	var reg RegistrationDTO
 	_ = json.Unmarshal(data, &reg)
-	if want := specs[0].LoosePrice + 4*specs[1].LoosePrice; reg.PayableAmount != want {
+	want := model.LineAmount(1, specs[0].UnitPriceMilli) + model.LineAmount(4, specs[1].UnitPriceMilli)
+	if reg.PayableAmount != want {
 		t.Fatalf("金额算错: got=%d want=%d", reg.PayableAmount, want)
 	}
 
@@ -379,87 +330,20 @@ func TestRegistrationMinIsWholeOrder(t *testing.T) {
 	}
 }
 
-// TestRegistrationLooseWithBox 一档挑 9 只：1 盒按套餐价 + 1 只按散买价，不再被零头拦下。
-func TestRegistrationLooseWithBox(t *testing.T) {
+// TestRegistrationMinQuantity 起订只数：一共不够 5 只直接拒，够了就放行。
+func TestRegistrationMinQuantity(t *testing.T) {
 	e := newTestEnv(t)
 	sp := e.publicSpecIDs(t)[0]
 
-	n := sp.PackSize + 1
-	_, resp, data := e.register(t, registerBody(e.regLink(t, ""), sp.ID, n, "13900139033"))
-	if resp.Code != errs.CodeOK {
-		t.Fatalf("%d 只该放行: code=%d msg=%s", n, resp.Code, resp.Msg)
-	}
-	var reg RegistrationDTO
-	_ = json.Unmarshal(data, &reg)
-	if want := sp.UnitPrice + sp.LoosePrice; reg.PayableAmount != want {
-		t.Fatalf("整盒 + 1 只散的金额算错: got=%d want=%d", reg.PayableAmount, want)
-	}
-}
-
-// TestRegistrationLoosePriceBeatsNothing 散买价比整盒摊下来贵，凑整盒才划算。
-// 这条守着「向上取整」的方向：取整取反了会让散买比整盒便宜。
-func TestRegistrationLoosePriceBeatsNothing(t *testing.T) {
-	e := newTestEnv(t)
-	for _, sp := range e.publicSpecIDs(t) {
-		if sp.PackSize == 0 {
-			continue
-		}
-		if got := sp.LoosePrice * int64(sp.PackSize); got <= sp.UnitPrice {
-			t.Errorf("「%s」散买 %d 只 %d 分 ≤ 整盒 %d 分，整盒反而不划算",
-				sp.SpecLabel, sp.PackSize, got, sp.UnitPrice)
-		}
-	}
-}
-
-// TestRegistrationMinQuantity 起订只数：按只卖的档不够 5 只直接拒，够了就放行。
-// 套餐一盒 8 只，天然过线，所以这条要靠一个「按只」的档才测得出来。
-func TestRegistrationMinQuantity(t *testing.T) {
-	e := newTestEnv(t)
-
-	// 价目表里加一档按只卖的，pack_size=0
-	created := e.mustOK(t, http.MethodPost, "/api/specs", map[string]any{
-		"gender": "male", "spec_gram": 225, "spec_label": "4.5两", "unit": "piece", "unit_price": 8800,
-	})
-	var piece SpecDTO
-	if err := json.Unmarshal(created, &piece); err != nil {
-		t.Fatalf("解析规格失败: %v", err)
-	}
-
-	// 起订量跟着价目表一起下发，页面不用自己写死一个数字
-	status, resp, data := e.callWithToken(t, http.MethodGet, "/api/public/specs", nil, "")
-	if status != http.StatusOK || resp.Code != errs.CodeOK {
-		t.Fatalf("公开价目表失败: code=%d", resp.Code)
-	}
-	var meta struct {
-		MinQuantity int `json:"min_quantity"`
-	}
-	_ = json.Unmarshal(data, &meta)
-	if meta.MinQuantity != service.RegMinCrabs {
-		t.Fatalf("起订量没下发: %d", meta.MinQuantity)
-	}
-
-	// 一共 4 只 → 不够
-	body := registerBody(e.regLink(t, ""), piece.ID, 4, "13900139020")
-	status, resp, _ = e.register(t, body)
+	body := registerBody(e.regLink(t, ""), sp.ID, service.RegMinCrabs-1, "13900139020")
+	status, resp, _ := e.register(t, body)
 	if resp.Code != errs.CodeInvalidParam {
 		t.Fatalf("4 只该被拒: status=%d code=%d msg=%s", status, resp.Code, resp.Msg)
 	}
 
-	// 5 只 → 刚好放行
-	body = registerBody(e.regLink(t, ""), piece.ID, service.RegMinCrabs, "13900139021")
+	body = registerBody(e.regLink(t, ""), sp.ID, service.RegMinCrabs, "13900139021")
 	if _, resp, _ = e.register(t, body); resp.Code != errs.CodeOK {
 		t.Fatalf("%d 只该放行: code=%d msg=%s", service.RegMinCrabs, resp.Code, resp.Msg)
-	}
-}
-
-// TestRegistrationPackMeetsMinimum 一盒 8 只，只买一盒也过线。
-func TestRegistrationPackMeetsMinimum(t *testing.T) {
-	e := newTestEnv(t)
-	sp := e.publicSpecIDs(t)[0]
-
-	_, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, sp.PackSize, "13900139022"))
-	if resp.Code != errs.CodeOK {
-		t.Fatalf("整一盒该放行: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 }
 
@@ -470,11 +354,11 @@ func TestRegistrationDuplicatePhone(t *testing.T) {
 	sp := e.publicSpecIDs(t)[0]
 	phone := "13900139004"
 
-	if status, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, sp.PackSize, phone)); resp.Code != errs.CodeOK {
+	if status, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, PackHint, phone)); resp.Code != errs.CodeOK {
 		t.Fatalf("首次登记失败: status=%d code=%d", status, resp.Code)
 	}
 
-	status, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, sp.PackSize, phone))
+	status, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, PackHint, phone))
 	if resp.Code != errs.CodeIdempotent {
 		t.Fatalf("重复手机号没被拦: status=%d code=%d msg=%s", status, resp.Code, resp.Msg)
 	}
@@ -512,7 +396,7 @@ func TestRegistrationBadToken(t *testing.T) {
 	}
 	for name, tk := range cases {
 		t.Run(name, func(t *testing.T) {
-			status, resp, _ := e.register(t, registerBody(tk, sp.ID, sp.PackSize, "13900139005"))
+			status, resp, _ := e.register(t, registerBody(tk, sp.ID, PackHint, "13900139005"))
 			if resp.Code != errs.CodeUnauthorized {
 				t.Fatalf("该拒绝却放行了: status=%d code=%d", status, resp.Code)
 			}
@@ -530,7 +414,7 @@ func TestRegistrationExpiredToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("签发失败: %v", err)
 	}
-	status, resp, _ := e.register(t, registerBody(expired, sp.ID, sp.PackSize, "13900139006"))
+	status, resp, _ := e.register(t, registerBody(expired, sp.ID, PackHint, "13900139006"))
 	if resp.Code != errs.CodeUnauthorized {
 		t.Fatalf("过期链接被放行: status=%d code=%d", status, resp.Code)
 	}
@@ -551,7 +435,7 @@ func TestRegistrationRejectsDisabledSpec(t *testing.T) {
 		}
 	}
 
-	status, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, sp.PackSize, "13900139007"))
+	status, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, PackHint, "13900139007"))
 	if resp.Code != errs.CodeInvalidParam {
 		t.Fatalf("停用规格被收下了: status=%d code=%d", status, resp.Code)
 	}
@@ -566,29 +450,26 @@ func TestRegLinkRequiresLogin(t *testing.T) {
 	}
 }
 
-// TestDashboardCountsCrabsNotBoxes 看板只数按蟹算：一盒按盒里的只数计，同一档不因公母比例拆行。
-func TestDashboardCountsCrabsNotBoxes(t *testing.T) {
+// TestDashboardCountsCrabs 看板只数就是明细只数之和；同一档（性别 + 克重 + 品相）合成一行。
+func TestDashboardCountsCrabs(t *testing.T) {
 	e := newTestEnv(t)
 	sp := e.publicSpecIDs(t)[0]
 
-	a := registerBody(e.regLink(t, ""), sp.ID, 13, "13900139031")
-	a["items"] = []map[string]any{{"spec_id": sp.ID, "quantity": 13, "male_count": 6}}
-	if status, resp, _ := e.register(t, a); resp.Code != errs.CodeOK {
+	if status, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, 13, "13900139031")); resp.Code != errs.CodeOK {
 		t.Fatalf("登记失败: status=%d msg=%s", status, resp.Msg)
 	}
-	b := registerBody(e.regLink(t, ""), sp.ID, 8, "13900139032")
-	if status, resp, _ := e.register(t, b); resp.Code != errs.CodeOK {
+	if status, resp, _ := e.register(t, registerBody(e.regLink(t, ""), sp.ID, 8, "13900139032")); resp.Code != errs.CodeOK {
 		t.Fatalf("登记失败: status=%d msg=%s", status, resp.Msg)
 	}
-	// 卖家录单只传规格不传每盒只数，后端回价目表补
+	// 卖家录同一档，临时改了价——改价不影响分组
 	manual := sampleOrderBody()
 	manual["items"] = []map[string]any{{
-		"gender": "mixed", "spec_gram": sp.SpecGram, "spec_label": sp.SpecLabel,
-		"unit": "box", "quantity": 1, "unit_price": sp.UnitPrice,
+		"gender": sp.Gender, "spec_gram": sp.SpecGram, "grade": sp.Grade, "spec_label": sp.SpecLabel,
+		"quantity": 8, "unit_price_milli": 30000,
 	}}
 	o := decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", manual))
-	if o.Items[0].CrabCount != sp.PackSize || o.Items[0].PackSize != sp.PackSize {
-		t.Fatalf("录单的盒没折出只数: crab_count=%d pack_size=%d", o.Items[0].CrabCount, o.Items[0].PackSize)
+	if o.CrabCount != 8 || o.GoodsAmount != 24000 {
+		t.Fatalf("录单只数或货款不对: crabs=%d goods=%d", o.CrabCount, o.GoodsAmount)
 	}
 
 	var d struct {
@@ -596,34 +477,18 @@ func TestDashboardCountsCrabsNotBoxes(t *testing.T) {
 			CrabCount int `json:"crab_count"`
 			BySpec    []struct {
 				SpecLabel string `json:"spec_label"`
-				Unit      string `json:"unit"`
+				Grade     string `json:"grade"`
 				Quantity  int    `json:"quantity"`
-				CrabCount int    `json:"crab_count"`
 			} `json:"by_spec"`
 		} `json:"range"`
 	}
 	if err := json.Unmarshal(e.mustOK(t, http.MethodGet, "/api/stats/dashboard", nil), &d); err != nil {
 		t.Fatalf("解析看板失败: %v", err)
 	}
-	if want := 13 + 8 + sp.PackSize; d.Range.CrabCount != want {
+	if want := 13 + 8 + 8; d.Range.CrabCount != want {
 		t.Fatalf("看板只数 %d，期望 %d", d.Range.CrabCount, want)
 	}
-	if len(d.Range.BySpec) != 2 {
-		t.Fatalf("同一档该合成整盒、散只两行，实际 %+v", d.Range.BySpec)
-	}
-	for _, s := range d.Range.BySpec {
-		if strings.Contains(s.SpecLabel, "（公") {
-			t.Errorf("规格名里不该带公母比例: %s", s.SpecLabel)
-		}
-		switch s.Unit {
-		case "box":
-			if s.Quantity != 3 || s.CrabCount != 3*sp.PackSize {
-				t.Errorf("整盒行: %+v", s)
-			}
-		case "piece":
-			if s.Quantity != 5 || s.CrabCount != 5 {
-				t.Errorf("散只行: %+v", s)
-			}
-		}
+	if len(d.Range.BySpec) != 1 || d.Range.BySpec[0].Quantity != 29 || d.Range.BySpec[0].Grade != "normal" {
+		t.Fatalf("同一档该合成一行: %+v", d.Range.BySpec)
 	}
 }

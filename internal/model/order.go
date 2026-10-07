@@ -70,49 +70,59 @@ func (o *Order) FreightSellerPart() int64 {
 	return *o.FreightCost - o.FreightFee
 }
 
-// CrabCount 整单一共多少只（按斤的明细不计）。
+// CrabCount 整单一共多少只。明细一律按只记，数量就是只数。
 func (o *Order) CrabCount() int {
 	n := 0
 	for _, it := range o.Items {
-		n += it.CrabCount
+		n += it.Quantity
 	}
 	return n
 }
 
-// ItemsSummary 明细摘要，形如 "公4.5两×5, 母3.5两×5"，用于列表与导出。
-//
-// 套餐（mixed）不加「公母」前缀：一盒里公母都有，前缀说不出任何东西，
-// 而它的 spec_label 本来就写着盒里装的是什么。
+// ItemsSummary 明细摘要，形如 "母3两×8, 公4两(残)×2"，用于列表与导出。
 func (o *Order) ItemsSummary() string {
 	s := ""
 	for i, it := range o.Items {
 		if i > 0 {
 			s += ", "
 		}
-		if it.Gender != GenderMixed {
-			s += it.Gender.Text()
-		}
-		s += it.SpecLabel + "×" + strconv.Itoa(it.Quantity)
+		s += it.Title() + "×" + strconv.Itoa(it.Quantity)
 	}
 	return s
 }
 
-// OrderItem 订单明细。SpecLabel 与 UnitPrice 是下单时的快照，
-// 不与 specs 表做外键关联——今年 4.5 两卖 88 元，明年卖 95 元，历史订单金额不能跟着变。
+// OrderItem 订单明细，一律按只记：Quantity 就是只数。
+// SpecLabel 与 UnitPriceMilli 是下单时的快照，不与 specs 表做外键关联——
+// 今年 3 两卖 33.625 元一只，明年卖 35 元，历史订单金额不能跟着变。
 type OrderItem struct {
 	ID        int64
 	OrderID   int64
 	Gender    Gender
 	SpecGram  int
+	Grade     Grade
 	SpecLabel string
-	Unit      Unit
 	Quantity  int
-	UnitPrice int64
-	Amount    int64 // = Quantity * UnitPrice
-	// CrabCount 这一行折合多少只：按只就是数量，按盒是盒数 × 每盒只数，按斤为 0。
-	// 存快照是因为价目表里的每盒只数日后可能改，历史订单的只数不能跟着变。
-	CrabCount int
-	SortNo    int
+	// UnitPriceMilli 单只价，单位「厘」（0.001 元），见 MilliPerYuan。
+	UnitPriceMilli int64
+	Amount         int64 // 分，= LineAmount(Quantity, UnitPriceMilli)
+	SortNo         int
+}
+
+// Title 明细的展示名，形如「母3两」「公4两(残)」。
+// 改版前的混装老明细不加性别前缀：它的 spec_label 本来就写着盒里装的是什么。
+func (it OrderItem) Title() string {
+	return specTitle(it.Gender, it.SpecLabel, it.Grade)
+}
+
+func specTitle(g Gender, label string, grade Grade) string {
+	s := label
+	if g == GenderMale || g == GenderFemale {
+		s = g.Text() + s
+	}
+	if grade == GradeBroken {
+		s += "(残)"
+	}
+	return s
 }
 
 // OrderLog 操作流水。收款与退款也记在这里：Amount 是这一笔的金额（退款为负），
@@ -136,25 +146,25 @@ func (l OrderLog) IsPayment() bool {
 	return (l.Action == ActionPay || l.Action == ActionRefund) && l.Amount != 0
 }
 
-// Spec 价目表的一档。按只卖就是一只的价，按套餐卖就是一盒的价。
+// Spec 价目表的一档：一种蟹（性别 + 克重 + 品相）一只多少钱。
+//
+// 数据里没有「盒」：一律按只计价。「8 只一盒」只是前端为了好报价做的展示。
 // 仅在录单与买家登记时用于填充默认值，订单明细存的是快照，不回头关联这张表。
 type Spec struct {
 	ID        int64
 	Gender    Gender
 	SpecGram  int
+	Grade     Grade
 	SpecLabel string
-	Unit      Unit
-	UnitPrice int64
-	// PackSize 一盒几只。0 表示这一档不是套餐（按只/按斤卖）。
-	// 套餐的公母比例由买家在登记页自己定，总数固定为 PackSize，价格不随比例变。
-	PackSize  int
-	Enabled   bool
-	SortNo    int
-	UpdatedAt int64
+	// UnitPriceMilli 单只价，单位「厘」（0.001 元），见 MilliPerYuan。
+	UnitPriceMilli int64
+	Enabled        bool
+	SortNo         int
+	UpdatedAt      int64
 }
 
-// IsPack 这一档是不是按盒卖的套餐。
-func (s Spec) IsPack() bool { return s.PackSize > 0 }
+// Title 规格的展示名，形如「母3两」「公4两(残)」。
+func (s Spec) Title() string { return specTitle(s.Gender, s.SpecLabel, s.Grade) }
 
 // Address 地址簿条目，从历史订单聚合而来，不单独建客户表。
 type Address struct {
@@ -199,12 +209,12 @@ type OrderFilter struct {
 	PageSize int
 }
 
-// StatsRange 区间统计中的按规格聚合项。
+// SpecStat 区间统计中的按规格聚合项：按「性别 + 克重 + 品相」分组。
 type SpecStat struct {
 	Gender    Gender `json:"gender"`
+	SpecGram  int    `json:"spec_gram"`
+	Grade     Grade  `json:"grade"`
 	SpecLabel string `json:"spec_label"`
-	Unit      Unit   `json:"unit"`
 	Quantity  int    `json:"quantity"`
-	CrabCount int    `json:"crab_count"`
 	Amount    int64  `json:"amount"`
 }

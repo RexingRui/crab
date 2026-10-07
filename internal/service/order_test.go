@@ -21,8 +21,8 @@ func errCode(err error) int {
 
 func TestCalcAmounts(t *testing.T) {
 	items := []model.OrderItem{
-		{Quantity: 5, UnitPrice: 8800, Amount: CalcItemAmount(5, 8800)},
-		{Quantity: 5, UnitPrice: 6800, Amount: CalcItemAmount(5, 6800)},
+		{Quantity: 5, UnitPriceMilli: 88000, Amount: CalcItemAmount(5, 88000)},
+		{Quantity: 5, UnitPriceMilli: 68000, Amount: CalcItemAmount(5, 68000)},
 	}
 	if items[0].Amount != 44000 {
 		t.Errorf("明细金额 = %d, want 44000", items[0].Amount)
@@ -41,7 +41,7 @@ func TestCalcAmounts(t *testing.T) {
 }
 
 func TestValidateMoneyDiscountExceeds(t *testing.T) {
-	items := []model.OrderItem{{Quantity: 1, UnitPrice: 8800, Amount: 8800}}
+	items := []model.OrderItem{{Quantity: 1, UnitPriceMilli: 88000, Amount: 8800}}
 
 	if _, _, err := validateMoney(items, 2000, 10801); errCode(err) != errs.CodeInvalidParam {
 		t.Errorf("优惠超过货款+运费应返回 40001，实际 %v", err)
@@ -72,10 +72,11 @@ func TestCreateOrderValidation(t *testing.T) {
 		{"地址过短", func(in *CreateOrderInput) { in.Address = "苏州" }},
 		{"明细为空", func(in *CreateOrderInput) { in.Items = nil }},
 		{"数量为 0", func(in *CreateOrderInput) { in.Items[0].Quantity = 0 }},
-		{"单价为负", func(in *CreateOrderInput) { in.Items[0].UnitPrice = -1 }},
+		{"单价为负", func(in *CreateOrderInput) { in.Items[0].UnitPriceMilli = -1 }},
 		{"规格克数为 0", func(in *CreateOrderInput) { in.Items[0].SpecGram = 0 }},
 		{"性别非法", func(in *CreateOrderInput) { in.Items[0].Gender = "other" }},
-		{"单位非法", func(in *CreateOrderInput) { in.Items[0].Unit = "ton" }},
+		{"品相非法", func(in *CreateOrderInput) { in.Items[0].Grade = "ok" }},
+		{"混装不再是合法性别", func(in *CreateOrderInput) { in.Items[0].Gender = model.GenderMixed }},
 		{"发货日格式错误", func(in *CreateOrderInput) { in.ExpectShipDate = "2026/09/16" }},
 	}
 	for _, c := range cases {

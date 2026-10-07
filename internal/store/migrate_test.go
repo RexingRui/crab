@@ -76,8 +76,10 @@ func TestMigrateAddsSourceToExistingDB(t *testing.T) {
 	}
 }
 
-// TestMigrateBackfillsCrabCount 老明细补 crab_count：按只=数量，按盒回价目表乘每盒只数，按斤=0。
-func TestMigrateBackfillsCrabCount(t *testing.T) {
+// TestMigrateBoxToPiece 按盒计价的老库转成按只计价：
+// 明细的数量换成只数、单价换成单只价（厘），金额一分不动；规格表改名留底，换上按只的价目表。
+// 还顺带覆盖了更老的库：明细上连 crab_count 都没有，得先按价目表补出只数再转。
+func TestMigrateBoxToPiece(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "old.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -97,6 +99,7 @@ func TestMigrateBackfillsCrabCount(t *testing.T) {
 			spec_label TEXT NOT NULL, unit TEXT NOT NULL DEFAULT 'piece', unit_price INTEGER NOT NULL,
 			pack_size INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
 			sort_no INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
+		`CREATE UNIQUE INDEX uk_specs ON specs(gender, spec_gram, unit)`,
 		`INSERT INTO specs(gender, spec_gram, spec_label, unit, unit_price, pack_size, updated_at)
 		 VALUES('mixed', 1200, '8只装', 'box', 18900, 8, 1)`,
 		`INSERT INTO orders(order_no, receiver_name, phone, address, created_at, updated_at)
@@ -115,14 +118,72 @@ func TestMigrateBackfillsCrabCount(t *testing.T) {
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// 可重复执行：转过一次之后规格表没有 unit 列了，不会再转第二次。
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate 第二次: %v", err)
+	}
+
 	items, err := st.ListItemsByOrder(ctx, 1)
 	if err != nil {
 		t.Fatalf("list items: %v", err)
 	}
-	want := []int{16, 5, 0, 0}
+	want := []struct {
+		qty    int
+		milli  int64
+		amount int64
+	}{
+		{16, 23625, 37800}, // 2 盒 × 8 只，189 / 8 = 23.625
+		{5, 24000, 12000},  // 散只本来就按只
+		{3, 60000, 18000},  // 按斤折不出只数：数量照旧，单价换成厘
+		{1, 100000, 10000}, // 查不到每盒几只的盒：同上
+	}
+	if len(items) != len(want) {
+		t.Fatalf("明细条数 %d，期望 %d", len(items), len(want))
+	}
 	for i, it := range items {
-		if it.CrabCount != want[i] {
-			t.Errorf("%s: crab_count=%d，期望 %d", it.SpecLabel, it.CrabCount, want[i])
+		w := want[i]
+		if it.Quantity != w.qty || it.UnitPriceMilli != w.milli || it.Amount != w.amount {
+			t.Errorf("%s: 只数 %d 单价 %d 金额 %d，期望 %d / %d / %d",
+				it.SpecLabel, it.Quantity, it.UnitPriceMilli, it.Amount, w.qty, w.milli, w.amount)
+		}
+		if it.Grade != model.GradeNormal {
+			t.Errorf("%s: 老明细品相该是 normal，实际 %q", it.SpecLabel, it.Grade)
+		}
+	}
+	// 能折出只数的，按新公式重算金额也正好等于原金额
+	if got := model.LineAmount(items[0].Quantity, items[0].UnitPriceMilli); got != items[0].Amount {
+		t.Errorf("按新公式重算 %d，原金额 %d", got, items[0].Amount)
+	}
+
+	var n int
+	if err := st.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM specs_legacy`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("老规格表应改名为 specs_legacy 留底: n=%d err=%v", n, err)
+	}
+
+	// 新规格表是空的，种子数据写入按只计价的价目表
+	seeded, err := st.SeedSpecs(ctx, 100)
+	if err != nil || seeded != len(seedSpecs) {
+		t.Fatalf("seed: n=%d err=%v", seeded, err)
+	}
+	dup := model.Spec{Gender: model.GenderFemale, SpecGram: 150, Grade: model.GradeNormal,
+		SpecLabel: "3两", UnitPriceMilli: 1, UpdatedAt: 100}
+	if err := st.InsertSpec(ctx, &dup); !IsUniqueViolation(err) {
+		t.Fatalf("同 性别 + 克重 + 品相 应撞唯一索引，实际 %v", err)
+	}
+	broken := dup
+	broken.Grade = model.GradeBroken
+	if err := st.InsertSpec(ctx, &broken); err != nil {
+		t.Fatalf("同克重的残蟹是另一档，应能加: %v", err)
+	}
+}
+
+// 种子价目表：每一档 8 只正好是去年的整盒价。
+func TestSeedSpecsPackPrices(t *testing.T) {
+	want := map[int64]bool{18900: true, 26900: true, 35900: true, 43900: true}
+	for _, sp := range seedSpecs {
+		if got := model.LineAmount(8, sp.UnitPriceMilli); !want[got] {
+			t.Errorf("%s%s 8 只 = %d 分，不是整盒价", sp.Gender.Text(), sp.SpecLabel, got)
 		}
 	}
 }

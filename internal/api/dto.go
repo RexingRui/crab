@@ -11,22 +11,26 @@ import (
 // 这里集中构造对外的 JSON 视图：所有 *_yuan 与 *_text 派生字段都由后端统一提供，
 // 避免小程序端到处硬编码枚举翻译和分转元。
 
+// PackHint 前端报价用的「一盒」是几只：页面上写「8 只 = 189 元」。
+// 只是展示口径，数据里没有盒，订单一律按只记。
+const PackHint = 8
+
 type ItemDTO struct {
-	ID            int64  `json:"id"`
-	Gender        string `json:"gender"`
-	GenderText    string `json:"gender_text"`
-	SpecGram      int    `json:"spec_gram"`
-	SpecLabel     string `json:"spec_label"`
-	Unit          string `json:"unit"`
-	UnitText      string `json:"unit_text"`
-	Quantity      int    `json:"quantity"`
-	UnitPrice     int64  `json:"unit_price"`
-	UnitPriceYuan string `json:"unit_price_yuan"`
-	Amount        int64  `json:"amount"`
-	AmountYuan    string `json:"amount_yuan"`
-	CrabCount     int    `json:"crab_count"`
-	// PackSize 按盒的明细一盒几只（由只数快照反推），改单时原样回传即可。
-	PackSize int `json:"pack_size"`
+	ID         int64  `json:"id"`
+	Gender     string `json:"gender"`
+	GenderText string `json:"gender_text"`
+	SpecGram   int    `json:"spec_gram"`
+	Grade      string `json:"grade"`
+	GradeText  string `json:"grade_text"`
+	SpecLabel  string `json:"spec_label"`
+	// Title 展示名，形如「母3两」「公4两(残)」。
+	Title    string `json:"title"`
+	Quantity int    `json:"quantity"` // 只数
+	// UnitPriceMilli 单只价（厘）；UnitPriceYuan 形如 "23.625"、"35.00"。
+	UnitPriceMilli int64  `json:"unit_price_milli"`
+	UnitPriceYuan  string `json:"unit_price_yuan"`
+	Amount         int64  `json:"amount"`
+	AmountYuan     string `json:"amount_yuan"`
 }
 
 // PaymentDTO 一笔收款或退款，取自操作流水里带金额的那几条。
@@ -227,21 +231,21 @@ type PublicOrderDTO struct {
 // PublicSpecDTO 是买家登记页看到的规格：只给选规格必需的字段，
 // 不含 sort_no / updated_at 这类内部信息。
 type PublicSpecDTO struct {
-	ID            int64  `json:"id"`
-	Gender        string `json:"gender"`
-	GenderText    string `json:"gender_text"`
-	SpecGram      int    `json:"spec_gram"`
-	SpecLabel     string `json:"spec_label"`
-	Unit          string `json:"unit"`
-	UnitText      string `json:"unit_text"`
-	UnitPrice     int64  `json:"unit_price"`
-	UnitPriceYuan string `json:"unit_price_yuan"`
-	// PackSize 一盒几只，0 表示不是套餐（按只卖）。
-	PackSize int `json:"pack_size"`
-	// LoosePrice 凑不满一盒时，散买一只多少钱（整盒价摊开后向上取整到元）。
-	// 不是套餐的档就是它自己的单价。
-	LoosePrice     int64  `json:"loose_price"`
-	LoosePriceYuan string `json:"loose_price_yuan"`
+	ID         int64  `json:"id"`
+	Gender     string `json:"gender"`
+	GenderText string `json:"gender_text"`
+	SpecGram   int    `json:"spec_gram"`
+	Grade      string `json:"grade"`
+	GradeText  string `json:"grade_text"`
+	SpecLabel  string `json:"spec_label"`
+	Title      string `json:"title"`
+	// UnitPriceMilli 单只价（厘）。页面算小计必须用和后端同一个公式：
+	// 只数 × 单只价，向上取整到元。
+	UnitPriceMilli int64  `json:"unit_price_milli"`
+	UnitPriceYuan  string `json:"unit_price_yuan"`
+	// PackHintAmount 「PackHint 只多少钱」，页面上的主报价。
+	PackHintAmount     int64  `json:"pack_hint_amount"`
+	PackHintAmountYuan string `json:"pack_hint_amount_yuan"`
 }
 
 // RegistrationDTO 是买家提交登记后的回执：够他记住单号、核对自己填了什么就行，
@@ -261,19 +265,21 @@ type RegistrationDTO struct {
 }
 
 type SpecDTO struct {
-	ID            int64  `json:"id"`
-	Gender        string `json:"gender"`
-	GenderText    string `json:"gender_text"`
-	SpecGram      int    `json:"spec_gram"`
-	SpecLabel     string `json:"spec_label"`
-	Unit          string `json:"unit"`
-	UnitText      string `json:"unit_text"`
-	UnitPrice     int64  `json:"unit_price"`
-	UnitPriceYuan string `json:"unit_price_yuan"`
-	PackSize      int    `json:"pack_size"`
-	Enabled       bool   `json:"enabled"`
-	SortNo        int    `json:"sort_no"`
-	UpdatedAt     string `json:"updated_at"`
+	ID                 int64  `json:"id"`
+	Gender             string `json:"gender"`
+	GenderText         string `json:"gender_text"`
+	SpecGram           int    `json:"spec_gram"`
+	Grade              string `json:"grade"`
+	GradeText          string `json:"grade_text"`
+	SpecLabel          string `json:"spec_label"`
+	Title              string `json:"title"`
+	UnitPriceMilli     int64  `json:"unit_price_milli"`
+	UnitPriceYuan      string `json:"unit_price_yuan"`
+	PackHintAmount     int64  `json:"pack_hint_amount"`
+	PackHintAmountYuan string `json:"pack_hint_amount_yuan"`
+	Enabled            bool   `json:"enabled"`
+	SortNo             int    `json:"sort_no"`
+	UpdatedAt          string `json:"updated_at"`
 }
 
 type AddressDTO struct {
@@ -296,25 +302,20 @@ func nilIfEmpty(s string) *string {
 }
 
 func toItemDTO(it model.OrderItem) ItemDTO {
-	pack := 0
-	if it.Unit == model.UnitBox && it.Quantity > 0 {
-		pack = it.CrabCount / it.Quantity
-	}
 	return ItemDTO{
-		ID:            it.ID,
-		Gender:        string(it.Gender),
-		GenderText:    it.Gender.Text(),
-		SpecGram:      it.SpecGram,
-		SpecLabel:     it.SpecLabel,
-		Unit:          string(it.Unit),
-		UnitText:      it.Unit.Text(),
-		Quantity:      it.Quantity,
-		UnitPrice:     it.UnitPrice,
-		UnitPriceYuan: model.FormatYuan(it.UnitPrice),
-		Amount:        it.Amount,
-		AmountYuan:    model.FormatYuan(it.Amount),
-		CrabCount:     it.CrabCount,
-		PackSize:      pack,
+		ID:             it.ID,
+		Gender:         string(it.Gender),
+		GenderText:     it.Gender.Text(),
+		SpecGram:       it.SpecGram,
+		Grade:          string(it.Grade),
+		GradeText:      it.Grade.Text(),
+		SpecLabel:      it.SpecLabel,
+		Title:          it.Title(),
+		Quantity:       it.Quantity,
+		UnitPriceMilli: it.UnitPriceMilli,
+		UnitPriceYuan:  model.FormatMilliYuan(it.UnitPriceMilli),
+		Amount:         it.Amount,
+		AmountYuan:     model.FormatYuan(it.Amount),
 	}
 }
 
@@ -483,19 +484,20 @@ func ToPublicOrderDTO(o *model.Order) PublicOrderDTO {
 }
 
 func ToPublicSpecDTO(s model.Spec) PublicSpecDTO {
+	hint := service.CalcItemAmount(PackHint, s.UnitPriceMilli)
 	return PublicSpecDTO{
-		ID:             s.ID,
-		Gender:         string(s.Gender),
-		GenderText:     s.Gender.Text(),
-		SpecGram:       s.SpecGram,
-		SpecLabel:      s.SpecLabel,
-		Unit:           string(s.Unit),
-		UnitText:       s.Unit.Text(),
-		UnitPrice:      s.UnitPrice,
-		UnitPriceYuan:  model.FormatYuan(s.UnitPrice),
-		PackSize:       s.PackSize,
-		LoosePrice:     service.LoosePrice(s),
-		LoosePriceYuan: model.FormatYuan(service.LoosePrice(s)),
+		ID:                 s.ID,
+		Gender:             string(s.Gender),
+		GenderText:         s.Gender.Text(),
+		SpecGram:           s.SpecGram,
+		Grade:              string(s.Grade),
+		GradeText:          s.Grade.Text(),
+		SpecLabel:          s.SpecLabel,
+		Title:              s.Title(),
+		UnitPriceMilli:     s.UnitPriceMilli,
+		UnitPriceYuan:      model.FormatMilliYuan(s.UnitPriceMilli),
+		PackHintAmount:     hint,
+		PackHintAmountYuan: model.FormatYuan(hint),
 	}
 }
 
@@ -524,20 +526,23 @@ func ToRegistrationDTO(o *model.Order, idem bool) RegistrationDTO {
 }
 
 func ToSpecDTO(s model.Spec) SpecDTO {
+	hint := service.CalcItemAmount(PackHint, s.UnitPriceMilli)
 	return SpecDTO{
-		ID:            s.ID,
-		Gender:        string(s.Gender),
-		GenderText:    s.Gender.Text(),
-		SpecGram:      s.SpecGram,
-		SpecLabel:     s.SpecLabel,
-		Unit:          string(s.Unit),
-		UnitText:      s.Unit.Text(),
-		UnitPrice:     s.UnitPrice,
-		UnitPriceYuan: model.FormatYuan(s.UnitPrice),
-		PackSize:      s.PackSize,
-		Enabled:       s.Enabled,
-		SortNo:        s.SortNo,
-		UpdatedAt:     timex.Format(s.UpdatedAt),
+		ID:                 s.ID,
+		Gender:             string(s.Gender),
+		GenderText:         s.Gender.Text(),
+		SpecGram:           s.SpecGram,
+		Grade:              string(s.Grade),
+		GradeText:          s.Grade.Text(),
+		SpecLabel:          s.SpecLabel,
+		Title:              s.Title(),
+		UnitPriceMilli:     s.UnitPriceMilli,
+		UnitPriceYuan:      model.FormatMilliYuan(s.UnitPriceMilli),
+		PackHintAmount:     hint,
+		PackHintAmountYuan: model.FormatYuan(hint),
+		Enabled:            s.Enabled,
+		SortNo:             s.SortNo,
+		UpdatedAt:          timex.Format(s.UpdatedAt),
 	}
 }
 

@@ -10,24 +10,25 @@ import (
 type specReq struct {
 	Gender    model.Gender `json:"gender"`
 	SpecGram  int          `json:"spec_gram"`
+	Grade     model.Grade  `json:"grade"`
 	SpecLabel string       `json:"spec_label"`
-	Unit      model.Unit   `json:"unit"`
-	UnitPrice int64        `json:"unit_price"`
-	PackSize  int          `json:"pack_size"`
-	Enabled   *bool        `json:"enabled"`
-	SortNo    int          `json:"sort_no"`
+	// UnitPriceMilli 单只价，单位「厘」（0.001 元）。
+	UnitPriceMilli int64 `json:"unit_price_milli"`
+	Enabled        *bool `json:"enabled"`
+	SortNo         int   `json:"sort_no"`
+	// LegacyUnitPrice 改版前的字段（单价，分），见 itemReq。
+	LegacyUnitPrice *int64 `json:"unit_price"`
 }
 
 func (r specReq) toInput() service.SpecInput {
 	return service.SpecInput{
-		Gender:    r.Gender,
-		SpecGram:  r.SpecGram,
-		SpecLabel: r.SpecLabel,
-		Unit:      r.Unit,
-		UnitPrice: r.UnitPrice,
-		PackSize:  r.PackSize,
-		Enabled:   r.Enabled,
-		SortNo:    r.SortNo,
+		Gender:         r.Gender,
+		SpecGram:       r.SpecGram,
+		Grade:          r.Grade,
+		SpecLabel:      r.SpecLabel,
+		UnitPriceMilli: r.UnitPriceMilli,
+		Enabled:        r.Enabled,
+		SortNo:         r.SortNo,
 	}
 }
 
@@ -55,6 +56,10 @@ func (a *API) CreateSpec(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, err)
 		return
 	}
+	if req.LegacyUnitPrice != nil {
+		Fail(w, r, errLegacyPrice)
+		return
+	}
 	s, err := a.specs.Create(r.Context(), req.toInput())
 	if err != nil {
 		Fail(w, r, err)
@@ -74,6 +79,10 @@ func (a *API) UpdateSpec(w http.ResponseWriter, r *http.Request) {
 	var req specReq
 	if err := decodeJSON(r, &req); err != nil {
 		Fail(w, r, err)
+		return
+	}
+	if req.LegacyUnitPrice != nil {
+		Fail(w, r, errLegacyPrice)
 		return
 	}
 	s, err := a.specs.Update(r.Context(), id, req.toInput())

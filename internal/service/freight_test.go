@@ -11,12 +11,12 @@ import (
 
 func ptr(v int64) *int64 { return &v }
 
-// sixteenCrabs 两盒 8 只装，货款 538 元，建单时不填运费。
+// sixteenCrabs 16 只母 3 两（33.625 元/只），货款 538 元，建单时不填运费。
 func sixteenCrabs() CreateOrderInput {
 	in := sampleInput()
 	in.Items = []ItemInput{{
-		Gender: model.GenderMixed, SpecGram: 1400, SpecLabel: "8只装 母3.0两/公4.0两",
-		Unit: model.UnitBox, Quantity: 2, UnitPrice: 26900, PackSize: 8,
+		Gender: model.GenderFemale, SpecGram: 150, SpecLabel: "3两",
+		Quantity: 16, UnitPriceMilli: 33625,
 	}}
 	in.FreightFee = 0
 	in.Discount = 0
@@ -108,10 +108,22 @@ func TestFreightBasisAndOverride(t *testing.T) {
 	}})
 	mustCode(t, err, errs.CodeInvalidParam) // 按原价却没填原价
 
-	_, err = svc.SetFreight(ctx, SetFreightInput{ID: o.ID, FreightInput: FreightInput{
-		FreightCost: ptr(6000), BuyerFee: ptr(7000),
+	// 买家补的超过快递实付是正常的：券是卖家花钱买的，用大额券寄的单实付很低，
+	// 买家照常补运费（比如 16 只原价 58、实付 40，买家补了 60）
+	o, err = svc.SetFreight(ctx, SetFreightInput{ID: o.ID, FreightInput: FreightInput{
+		FreightList: ptr(5800), FreightCost: ptr(4000), BuyerFee: ptr(6000),
 	}})
-	mustCode(t, err, errs.CodeInvalidParam) // 买家承担超过运费
+	if err != nil {
+		t.Fatalf("买家补的超过实付应当允许: %v", err)
+	}
+	if o.FreightFee != 6000 || o.PayableAmount != 59800 || o.FreightSellerPart() != -2000 {
+		t.Fatalf("fee=%d payable=%d seller=%d", o.FreightFee, o.PayableAmount, o.FreightSellerPart())
+	}
+
+	_, err = svc.SetFreight(ctx, SetFreightInput{ID: o.ID, FreightInput: FreightInput{
+		FreightCost: ptr(6000), BuyerFee: ptr(-1),
+	}})
+	mustCode(t, err, errs.CodeInvalidParam) // 买家承担为负
 }
 
 // TestFreightRuleChangeOnlyAffectsNewOrders 规则换了新版本，老单仍按建单时的版本给建议值。

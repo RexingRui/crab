@@ -57,19 +57,18 @@ CREATE INDEX IF NOT EXISTS idx_orders_ctime  ON orders(created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_orders_request ON orders(request_id)
     WHERE request_id IS NOT NULL AND request_id != '';
 
--- ========== 订单明细 ==========
+-- ========== 订单明细（一律按只记） ==========
 CREATE TABLE IF NOT EXISTS order_items (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id    INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    gender      TEXT    NOT NULL,                       -- male/female/mixed
-    spec_gram   INTEGER NOT NULL,                       -- 规格克数，4.5两=225
-    spec_label  TEXT    NOT NULL,                       -- 展示用："4.5两"
-    unit        TEXT    NOT NULL DEFAULT 'piece',       -- piece/box/jin
-    quantity    INTEGER NOT NULL,
-    unit_price  INTEGER NOT NULL,                       -- 单价快照（分）
-    amount      INTEGER NOT NULL,                       -- = quantity * unit_price
-    crab_count  INTEGER NOT NULL DEFAULT 0,             -- 折合只数：按只=数量，按盒=盒数×每盒只数，按斤=0
-    sort_no     INTEGER NOT NULL DEFAULT 0
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id         INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    gender           TEXT    NOT NULL,                  -- male/female（改版前的老明细可能是 mixed）
+    spec_gram        INTEGER NOT NULL,                  -- 规格克数，3两=150
+    grade            TEXT    NOT NULL DEFAULT 'normal', -- normal 正常 / broken 残蟹
+    spec_label       TEXT    NOT NULL,                  -- 展示用："3两"
+    quantity         INTEGER NOT NULL,                  -- 只数
+    unit_price_milli INTEGER NOT NULL,                  -- 单只价快照（厘，0.001 元）
+    amount           INTEGER NOT NULL,                  -- 分，= 只数 × 单只价，向上取整到元
+    sort_no          INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id);
 
@@ -89,20 +88,19 @@ CREATE TABLE IF NOT EXISTS order_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_logs_order ON order_logs(order_id, created_at);
 
--- ========== 规格价目表（快速录单用） ==========
+-- ========== 规格价目表（按只计价，没有「盒」） ==========
 CREATE TABLE IF NOT EXISTS specs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    gender      TEXT    NOT NULL,
-    spec_gram   INTEGER NOT NULL,
-    spec_label  TEXT    NOT NULL,
-    unit        TEXT    NOT NULL DEFAULT 'piece',
-    unit_price  INTEGER NOT NULL,                       -- 当季参考价（按只就是只价，按盒就是整盒价）
-    pack_size   INTEGER NOT NULL DEFAULT 0,             -- 一盒几只；0 表示不是套餐
-    enabled     INTEGER NOT NULL DEFAULT 1,
-    sort_no     INTEGER NOT NULL DEFAULT 0,
-    updated_at  INTEGER NOT NULL
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    gender           TEXT    NOT NULL,                  -- male/female
+    spec_gram        INTEGER NOT NULL,
+    grade            TEXT    NOT NULL DEFAULT 'normal', -- normal 正常 / broken 残蟹
+    spec_label       TEXT    NOT NULL,
+    unit_price_milli INTEGER NOT NULL,                  -- 当季单只价（厘，0.001 元）
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    sort_no          INTEGER NOT NULL DEFAULT 0,
+    updated_at       INTEGER NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uk_specs ON specs(gender, spec_gram, unit);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_specs_piece ON specs(gender, spec_gram, grade);
 
 -- ========== 订单号日序列 ==========
 CREATE TABLE IF NOT EXISTS order_seq (

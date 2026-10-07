@@ -16,13 +16,13 @@ var ratioSuffix = regexp.MustCompile(`（公\d+母\d+）$`)
 
 // ---------- 规格价目表 ----------
 
-const specColumns = `id, gender, spec_gram, spec_label, unit, unit_price, pack_size, enabled, sort_no, updated_at`
+const specColumns = `id, gender, spec_gram, grade, spec_label, unit_price_milli, enabled, sort_no, updated_at`
 
 func scanSpec(sc rowScanner) (*model.Spec, error) {
 	var s model.Spec
 	var enabled int
-	if err := sc.Scan(&s.ID, &s.Gender, &s.SpecGram, &s.SpecLabel, &s.Unit,
-		&s.UnitPrice, &s.PackSize, &enabled, &s.SortNo, &s.UpdatedAt); err != nil {
+	if err := sc.Scan(&s.ID, &s.Gender, &s.SpecGram, &s.Grade, &s.SpecLabel,
+		&s.UnitPriceMilli, &enabled, &s.SortNo, &s.UpdatedAt); err != nil {
 		return nil, err
 	}
 	s.Enabled = enabled != 0
@@ -67,10 +67,10 @@ func (q *queries) GetSpecByID(ctx context.Context, id int64) (*model.Spec, error
 
 func (q *queries) InsertSpec(ctx context.Context, s *model.Spec) error {
 	res, err := q.db.ExecContext(ctx,
-		`INSERT INTO specs(gender, spec_gram, spec_label, unit, unit_price, pack_size, enabled, sort_no, updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?)`,
-		string(s.Gender), s.SpecGram, s.SpecLabel, string(s.Unit), s.UnitPrice,
-		s.PackSize, boolToInt(s.Enabled), s.SortNo, s.UpdatedAt)
+		`INSERT INTO specs(gender, spec_gram, grade, spec_label, unit_price_milli, enabled, sort_no, updated_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		string(s.Gender), s.SpecGram, string(s.Grade), s.SpecLabel, s.UnitPriceMilli,
+		boolToInt(s.Enabled), s.SortNo, s.UpdatedAt)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return fmt.Errorf("%w: %v", ErrDuplicate, err)
@@ -87,10 +87,10 @@ func (q *queries) InsertSpec(ctx context.Context, s *model.Spec) error {
 
 func (q *queries) UpdateSpec(ctx context.Context, s *model.Spec) error {
 	res, err := q.db.ExecContext(ctx,
-		`UPDATE specs SET gender=?, spec_gram=?, spec_label=?, unit=?, unit_price=?,
-		 pack_size=?, enabled=?, sort_no=?, updated_at=? WHERE id=?`,
-		string(s.Gender), s.SpecGram, s.SpecLabel, string(s.Unit), s.UnitPrice,
-		s.PackSize, boolToInt(s.Enabled), s.SortNo, s.UpdatedAt, s.ID)
+		`UPDATE specs SET gender=?, spec_gram=?, grade=?, spec_label=?, unit_price_milli=?,
+		 enabled=?, sort_no=?, updated_at=? WHERE id=?`,
+		string(s.Gender), s.SpecGram, string(s.Grade), s.SpecLabel, s.UnitPriceMilli,
+		boolToInt(s.Enabled), s.SortNo, s.UpdatedAt, s.ID)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return fmt.Errorf("%w: %v", ErrDuplicate, err)
@@ -238,7 +238,7 @@ func (q *queries) RangeSummary(ctx context.Context, start, end int64) (RangeSumm
 	}
 
 	err = q.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(i.crab_count),0) FROM order_items i
+		`SELECT COALESCE(SUM(i.quantity),0) FROM order_items i
 		 JOIN orders o ON o.id = i.order_id
 		 WHERE o.deleted_at IS NULL AND o.created_at >= ? AND o.created_at <= ?`,
 		start, end).Scan(&r.CrabCount)
@@ -248,21 +248,21 @@ func (q *queries) RangeSummary(ctx context.Context, start, end int64) (RangeSumm
 	return r, nil
 }
 
-// SpecStatsBetween 按规格聚合区间内的销量与金额。
+// SpecStatsBetween 按规格聚合区间内的销量（只数）与金额。
 //
-// 按「性别 + 克重 + 单位」分组，不按 spec_label：快照里带着公母比例（「（公4母4）」），
-// 档名也可能改过，按名字分组同一档会被拆成好几行。名称优先用价目表里的现名，
-// 价目表里没有了就取快照里的一个，再去掉比例后缀。
+// 按「性别 + 克重 + 品相」分组，不按 spec_label：档名可能改过，按名字分组同一档会被
+// 拆成好几行。名称优先用价目表里的现名，价目表里没有了就取快照里的一个，
+// 再去掉改版前混装老明细里的公母比例后缀。
 func (q *queries) SpecStatsBetween(ctx context.Context, start, end int64) ([]model.SpecStat, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT i.gender, i.unit,
+		`SELECT i.gender, i.spec_gram, i.grade,
 		        COALESCE((SELECT s.spec_label FROM specs s
-		                  WHERE s.gender = i.gender AND s.spec_gram = i.spec_gram AND s.unit = i.unit
+		                  WHERE s.gender = i.gender AND s.spec_gram = i.spec_gram AND s.grade = i.grade
 		                  ORDER BY s.enabled DESC, s.id DESC LIMIT 1), MIN(i.spec_label)),
-		        SUM(i.quantity), SUM(i.crab_count), SUM(i.amount)
+		        SUM(i.quantity), SUM(i.amount)
 		 FROM order_items i JOIN orders o ON o.id = i.order_id
 		 WHERE o.deleted_at IS NULL AND o.created_at >= ? AND o.created_at <= ?
-		 GROUP BY i.gender, i.spec_gram, i.unit
+		 GROUP BY i.gender, i.spec_gram, i.grade
 		 ORDER BY SUM(i.amount) DESC`, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("spec stats: %w", err)
@@ -272,7 +272,7 @@ func (q *queries) SpecStatsBetween(ctx context.Context, start, end int64) ([]mod
 	out := make([]model.SpecStat, 0, 8)
 	for rows.Next() {
 		var s model.SpecStat
-		if err := rows.Scan(&s.Gender, &s.Unit, &s.SpecLabel, &s.Quantity, &s.CrabCount, &s.Amount); err != nil {
+		if err := rows.Scan(&s.Gender, &s.SpecGram, &s.Grade, &s.SpecLabel, &s.Quantity, &s.Amount); err != nil {
 			return nil, fmt.Errorf("scan spec stat: %w", err)
 		}
 		s.SpecLabel = ratioSuffix.ReplaceAllString(s.SpecLabel, "")
