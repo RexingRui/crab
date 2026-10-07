@@ -24,27 +24,27 @@ func NewSpecService(st store.Store) *SpecService {
 
 func (s *SpecService) SetClock(f func() int64) { s.now = f }
 
+// SpecInput 一档规格：性别 + 克重 + 品相，一只多少钱。
 type SpecInput struct {
 	Gender    model.Gender
 	SpecGram  int
+	Grade     model.Grade // 空串按正常处理
 	SpecLabel string
-	Unit      model.Unit
-	UnitPrice int64
-	// PackSize 一盒几只，0 表示不是套餐。套餐的公母比例由买家定，不在这儿存。
-	PackSize int
-	Enabled  *bool
-	SortNo   int
+	// UnitPriceMilli 单只价，单位「厘」（0.001 元）。
+	UnitPriceMilli int64
+	Enabled        *bool
+	SortNo         int
 }
 
 func (in *SpecInput) validate() error {
 	if !in.Gender.Valid() {
-		return errs.InvalidParam("gender 非法，应为 male/female/mixed")
+		return errs.InvalidParam("gender 非法，应为 male/female")
 	}
-	if in.Unit == "" {
-		in.Unit = model.UnitPiece
+	if in.Grade == "" {
+		in.Grade = model.GradeNormal
 	}
-	if !in.Unit.Valid() {
-		return errs.InvalidParam("unit 非法，应为 piece/box/jin")
+	if !in.Grade.Valid() {
+		return errs.InvalidParam("grade 非法，应为 normal/broken")
 	}
 	if in.SpecGram <= 0 {
 		return errs.InvalidParam("spec_gram 必须大于 0")
@@ -52,20 +52,11 @@ func (in *SpecInput) validate() error {
 	if n := utf8.RuneCountInString(in.SpecLabel); n < 1 || n > 32 {
 		return errs.InvalidParam("spec_label 必填，长度 1-32 字符")
 	}
-	if in.UnitPrice < 0 {
-		return errs.InvalidParam("unit_price 不能为负")
-	}
-	if in.PackSize < 0 || in.PackSize > maxPackSize {
-		return errs.InvalidParam("pack_size 应在 0-%d 之间，0 表示不是套餐", maxPackSize)
-	}
-	if in.PackSize > 0 && in.Unit != model.UnitBox {
-		return errs.InvalidParam("pack_size 大于 0 时 unit 必须是 box")
+	if in.UnitPriceMilli < 0 {
+		return errs.InvalidParam("unit_price_milli 不能为负")
 	}
 	return nil
 }
-
-// maxPackSize 一盒最多几只。挡住手滑多按几个 0，不是业务上限。
-const maxPackSize = 99
 
 // List 列出规格。onlyEnabled 为 true 时只返回启用中的（小程序录单页下拉用）。
 func (s *SpecService) List(ctx context.Context, onlyEnabled bool) ([]model.Spec, error) {
@@ -85,19 +76,18 @@ func (s *SpecService) Create(ctx context.Context, in SpecInput) (*model.Spec, er
 		enabled = *in.Enabled
 	}
 	sp := &model.Spec{
-		Gender:    in.Gender,
-		SpecGram:  in.SpecGram,
-		SpecLabel: in.SpecLabel,
-		Unit:      in.Unit,
-		UnitPrice: in.UnitPrice,
-		PackSize:  in.PackSize,
-		Enabled:   enabled,
-		SortNo:    in.SortNo,
-		UpdatedAt: s.now(),
+		Gender:         in.Gender,
+		SpecGram:       in.SpecGram,
+		Grade:          in.Grade,
+		SpecLabel:      in.SpecLabel,
+		UnitPriceMilli: in.UnitPriceMilli,
+		Enabled:        enabled,
+		SortNo:         in.SortNo,
+		UpdatedAt:      s.now(),
 	}
 	if err := s.st.InsertSpec(ctx, sp); err != nil {
 		if store.IsUniqueViolation(err) {
-			return nil, errs.InvalidParam("同样的 gender + spec_gram + unit 已存在")
+			return nil, errs.InvalidParam("同样的 性别 + 克重 + 品相 已存在")
 		}
 		return nil, errs.Internal(err)
 	}
@@ -114,10 +104,9 @@ func (s *SpecService) Update(ctx context.Context, id int64, in SpecInput) (*mode
 	}
 	sp.Gender = in.Gender
 	sp.SpecGram = in.SpecGram
+	sp.Grade = in.Grade
 	sp.SpecLabel = in.SpecLabel
-	sp.Unit = in.Unit
-	sp.UnitPrice = in.UnitPrice
-	sp.PackSize = in.PackSize
+	sp.UnitPriceMilli = in.UnitPriceMilli
 	if in.Enabled != nil {
 		sp.Enabled = *in.Enabled
 	}
@@ -126,7 +115,7 @@ func (s *SpecService) Update(ctx context.Context, id int64, in SpecInput) (*mode
 
 	if err := s.st.UpdateSpec(ctx, sp); err != nil {
 		if store.IsUniqueViolation(err) {
-			return nil, errs.InvalidParam("同样的 gender + spec_gram + unit 已存在")
+			return nil, errs.InvalidParam("同样的 性别 + 克重 + 品相 已存在")
 		}
 		if errors.Is(err, errs.ErrNotFound) {
 			return nil, errs.NotFound("规格")

@@ -35,69 +35,29 @@ input:focus,textarea:focus{outline:none;border-color:var(--shell)}
 input[type=tel],input[type=date]{font-variant-numeric:tabular-nums}
 .gap{margin-top:20px}
 
-/* 两类之间单选：按套餐（选一档买整盒）/ 自由搭配（按只挑） */
-.seg{display:flex;background:var(--belly);border-radius:10px;padding:3px;margin-bottom:16px}
-.seg button{
-  flex:1;font:inherit;font-size:14px;padding:9px 0;border:none;border-radius:8px;
-  background:none;color:var(--muted);
-}
-.seg button.on{background:var(--card);color:var(--shell);font-weight:600;box-shadow:0 1px 3px rgba(28,35,30,.14)}
+/* 一种蟹一行：母在前、公在后，各起一个小标题 */
+.grp-t{font-size:12px;color:var(--muted);letter-spacing:.06em;margin:14px 0 2px}
+.grp-t:first-child{margin-top:0}
+.pick{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.grp-t + .pick{border-top:none}
+.pick .body{flex:1;min-width:0}
+.pick .nm{display:block;font-size:15px}
+.pick .pr{display:block;font-size:12px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+.pick .pr b{font-weight:600;color:var(--shell-deep)}
+.pick .sub{display:block;font-size:12px;color:var(--shell);margin-top:2px;font-variant-numeric:tabular-nums}
+.pick .sub:empty{display:none}
 
-.pane{display:none}
-.pane.on{display:block}
-
-/* 套餐：一档一行，单选 */
-.pack{
-  display:flex;align-items:center;gap:10px;width:100%;margin-top:8px;padding:11px 12px;
-  font:inherit;color:inherit;text-align:left;
-  background:var(--card);border:1px solid var(--line);border-radius:12px;
-}
-.pack.on{border-color:var(--shell);background:rgba(47,71,57,.06)}
-.pack .dot{
-  flex:none;width:15px;height:15px;border-radius:50%;box-sizing:border-box;
-  border:1.5px solid var(--line);background:var(--card);
-}
-.pack.on .dot{border:5px solid var(--shell)}
-.pack .body{flex:1;min-width:0}
-.pack .t{display:block;font-size:14px;line-height:1.4}
-.pack .p{display:block;font-size:12px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
-.pack .amt{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
-
-/* 套餐下面的两行：几盒、每盒公母 */
-.line-row{display:flex;align-items:center;gap:12px;margin-top:12px}
-.line-row .lab{flex:1;min-width:0;font-size:14px}
-.line-row .lab.sub{font-size:13px;color:var(--muted)}
-.line-row .lab b{font-weight:600;color:var(--shell-deep);font-variant-numeric:tabular-nums}
-.divide{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
-
-/* 自由搭配：四档 × 公母共八行。同档公母同价，两行挨着放 */
-.grp{border-top:1px solid var(--line);padding:10px 0}
-.grp:first-of-type{border-top:none}
-.pick{display:flex;align-items:center;gap:10px}
-.pick + .pick{margin-top:8px}
-.pick .nm{flex:1;min-width:0;font-size:14px}
-.pick .pr{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
-.note{font-size:12px;color:var(--shell);margin-top:8px;font-variant-numeric:tabular-nums}
-
-/* 加减器。自由搭配那八行用小一号的，免得和套餐的「几盒」分不清主次 */
+/* 加减器 + 「一盒」快捷键：按只计价，但 8 只一盒是大家习惯的买法，一下加满 */
 .step{display:flex;align-items:center;gap:2px}
 .step button{
-  width:32px;height:32px;padding:0;margin:0;border-radius:8px;
+  width:30px;height:30px;padding:0;margin:0;border-radius:8px;
   border:1px solid var(--line);background:var(--card);color:var(--shell);
-  font:inherit;font-size:18px;line-height:1;font-weight:400;
+  font:inherit;font-size:17px;line-height:1;font-weight:400;
 }
 .step button:disabled{opacity:.3}
-.step .n{width:40px;text-align:center;font-variant-numeric:tabular-nums;font-size:16px}
+.step button.box{width:auto;padding:0 8px;font-size:13px;margin-left:4px}
+.step .n{width:30px;text-align:center;font-variant-numeric:tabular-nums;font-size:15px}
 .step .n.zero{color:var(--muted)}
-.step--sm button{width:30px;height:30px;font-size:17px}
-.step--sm .n{width:28px;font-size:15px}
-
-/* 两类选的东西合在一张单里，各自一行摆出来——
-   不然你在「自由搭配」页签上看不见套餐那边选了什么，只看到合计莫名多出几百块 */
-.bd{display:flex;justify-content:space-between;gap:12px;font-size:13px;margin-top:10px}
-.bd:first-child{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
-.bd .k{flex:1;min-width:0;color:var(--muted)}
-.bd .v{font-variant-numeric:tabular-nums}
 
 .sum{
   display:flex;justify-content:space-between;align-items:baseline;
@@ -147,38 +107,16 @@ button.go:disabled{opacity:.45}
     <div class="card" id="specCard">
       <h2>要什么蟹</h2>
 
-      <div class="seg" id="seg">
-        <button type="button" class="on" id="tabPack">按套餐</button>
-        <button type="button" id="tabFree">自由搭配</button>
-      </div>
-
       <div id="loading" class="dead">正在取当季的价目…</div>
+      <div class="hint" id="pickHint" style="margin:0 0 6px;display:none">按只算，公母随便配，一共 <b id="minNum">5</b> 只起。</div>
+      <div id="picks"></div>
 
-      <div class="pane on" id="panePack">
-        <div id="packs"></div>
-        <div class="line-row divide">
-          <span class="lab">要几盒</span>
-          <div class="step">
-            <button type="button" id="boxMinus" aria-label="少一盒">−</button>
-            <span class="n" id="boxNum">1</span>
-            <button type="button" id="boxPlus" aria-label="多一盒">+</button>
-          </div>
-        </div>
-        <div class="hint" style="margin-top:10px">整盒默认公母各一半。想自己配比例，去「自由搭配」按只挑，同一档凑满一盒照样按整盒价算。</div>
-      </div>
-
-      <div class="pane" id="paneFree">
-        <div class="hint" style="margin:0 0 8px">按只挑，公母随便配，一共 <b id="minNum">5</b> 只起。<br>同一档凑满一盒自动按整盒价算。</div>
-        <div id="picks"></div>
-      </div>
-
-      <div id="breakdown"></div>
       <div class="sum">
         <span class="k">货款合计 <span class="cnt" id="count"></span></span>
         <span class="v" id="total">¥0.00</span>
       </div>
       <div class="err err--inline" id="pickErr"></div>
-      <div class="hint" id="hint">按当季价算的货款，不含运费。运费和最终费用等发出后确认。</div>
+      <div class="hint" id="hint">按当季价按只算的货款，零头进到元，不含运费。运费和最终费用等发出后确认。</div>
     </div>
 
     <div class="card">
@@ -229,11 +167,10 @@ button.go:disabled{opacity:.45}
   var token = (new URLSearchParams(location.search).get('t') || '').trim()
 
   var specs = []    // 后端 /api/public/specs 的原样数据
-  var tab = 'pack'  // pack=按套餐 / free=自由搭配，两类之间单选
-  var picked = null // 按套餐选中的那一档
-  var boxes = 1     // 按套餐要几盒
-  var free = {}     // 自由搭配：spec_id -> {f: 母几只, m: 公几只}
+  var qty = {}      // spec_id -> 几只
   var minQty = 0    // 整单起订只数，跟着价目表一起从后端拿，不在这儿写死
+  var packHint = 8  // 「8 只 = 多少钱」的那个 8，也从后端拿
+  var MAX = 200
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -277,266 +214,108 @@ button.go:disabled{opacity:.45}
 
   // ---------- 价目 ----------
 
-  // 两条路：按套餐（选一档买整盒）与自由搭配（按只挑）。
-  // 切换只换显示，不清空另一边填过的东西；提交只看当前这一边。
-  function setTab(next) {
-    tab = next
-    var onPack = tab === 'pack'
-    $('tabPack').className = onPack ? 'on' : ''
-    $('tabFree').className = onPack ? '' : 'on'
-    $('panePack').className = 'pane' + (onPack ? ' on' : '')
-    $('paneFree').className = 'pane' + (onPack ? '' : ' on')
-    fail('')
-    total()
+  // 一行多少钱（分）= 只数 × 单只价（厘），向上取整到元。
+  // 必须和后端 model.LineAmount 同一个公式：页面上看到的就是最后要收的。
+  function lineAmount(n, milli) {
+    var t = n * milli
+    return t > 0 ? Math.ceil(t / 1000) * 100 : 0
   }
 
-  function packById(id) {
-    for (var i = 0; i < specs.length; i++) {
-      if (String(specs[i].id) === String(id)) return specs[i]
-    }
-    return null
+  // 单只价约到角就够看了：23.625 → 约 ¥23.6。真正算钱用的是上面的精确公式。
+  function aboutYuan(milli) {
+    return '¥' + (Math.round(milli / 100) / 10).toFixed(1)
   }
 
-  // 套餐名里已经写了盒里装什么，不再加「公母」前缀，那个前缀说不出任何东西
-  function packName(s) {
-    return s.pack_size > 0 ? s.spec_label : s.gender_text + s.spec_label
+  function specName(s) {
+    return s.title || ((s.gender_text || '') + s.spec_label + (s.grade === 'broken' ? '(残)' : ''))
   }
 
-  // ---------- 按套餐 ----------
-
-  function renderPacks() {
-    var html = ''
-    for (var i = 0; i < specs.length; i++) {
-      var s = specs[i]
-      var on = String(s.id) === String(picked)
-      var sub = s.pack_size > 0
-        ? s.pack_size + ' 只装　散买 ' + yuan(s.loose_price) + ' / 只'
-        : yuan(s.unit_price) + ' / ' + s.unit_text
-      html +=
-        '<button type="button" class="pack' + (on ? ' on' : '') + '" data-id="' + s.id + '" aria-pressed="' + on + '">' +
-          '<span class="dot"></span>' +
-          '<span class="body">' +
-            '<span class="t">' + esc(packName(s)) + '</span>' +
-            '<span class="p">' + esc(sub) + '</span>' +
-          '</span>' +
-          '<span class="amt">' + esc(yuan(s.unit_price)) + '</span>' +
-        '</button>'
-    }
-    $('packs').innerHTML = html
-    var btns = $('packs').getElementsByTagName('button')
-    for (var k = 0; k < btns.length; k++) {
-      btns[k].addEventListener('click', function () {
-        picked = this.getAttribute('data-id')
-        renderPacks()
-        total()
-      })
-    }
-  }
-
-  // 套餐只选几盒。整盒的公母一律各一半——想自己配比例就去自由搭配按只挑，
-  // 同一档凑满一盒照样按整盒价算，不用在这儿再放一组加减器。
-  function syncBoxes() {
-    pickFail('')
-    setText('boxNum', boxes)
-    $('boxMinus').disabled = boxes <= 1
-  }
-
-  // ---------- 自由搭配 ----------
-
-  // 八行：四档 × 公母。同档公母同价，两行挨着放，一眼看出是一个价。
   function renderPicks() {
+    var groups = [['female', '母蟹'], ['male', '公蟹']]
     var html = ''
-    for (var i = 0; i < specs.length; i++) {
-      var s = specs[i]
-      if (!s.pack_size) continue
-      var parts = splitLabel(s.spec_label)
-      html +=
-        '<div class="grp">' +
-          pickRow(s, 'f', parts.female) +
-          pickRow(s, 'm', parts.male) +
-          '<div class="note" id="note' + s.id + '"></div>' +
-        '</div>'
+    for (var g = 0; g < groups.length; g++) {
+      var rows = ''
+      for (var i = 0; i < specs.length; i++) {
+        var s = specs[i]
+        if (s.gender !== groups[g][0]) continue
+        var hint = s.pack_hint_amount != null ? s.pack_hint_amount : lineAmount(packHint, s.unit_price_milli)
+        rows +=
+          '<div class="pick">' +
+            '<span class="body">' +
+              '<span class="nm">' + esc(specName(s)) + '</span>' +
+              '<span class="pr"><b>' + packHint + ' 只 ' + esc(yuan(hint)) + '</b>　约 ' + esc(aboutYuan(s.unit_price_milli)) + ' / 只</span>' +
+              '<span class="sub" id="sub' + s.id + '"></span>' +
+            '</span>' +
+            '<div class="step">' +
+              '<button type="button" data-id="' + s.id + '" data-d="-1" aria-label="少一只" disabled>−</button>' +
+              '<span class="n zero" id="n' + s.id + '">0</span>' +
+              '<button type="button" data-id="' + s.id + '" data-d="1" aria-label="多一只">+</button>' +
+              '<button type="button" class="box" data-id="' + s.id + '" data-d="' + packHint + '" aria-label="加 ' + packHint + ' 只">+' + packHint + '</button>' +
+            '</div>' +
+          '</div>'
+      }
+      if (rows) html += '<div class="grp-t">' + groups[g][1] + '</div>' + rows
     }
     $('picks').innerHTML = html
 
     var btns = $('picks').getElementsByTagName('button')
     for (var k = 0; k < btns.length; k++) {
       btns[k].addEventListener('click', function () {
-        bump(this.getAttribute('data-id'), this.getAttribute('data-k'), +this.getAttribute('data-d'))
+        bump(this.getAttribute('data-id'), +this.getAttribute('data-d'))
       })
     }
-    for (var j = 0; j < specs.length; j++) refreshGroup(specs[j].id)
+    for (var j = 0; j < specs.length; j++) refreshRow(specs[j])
   }
 
-  function pickRow(s, kind, label) {
-    return '<div class="pick">' +
-      '<span class="nm">' + esc(label) + '</span>' +
-      '<span class="pr">' + esc(yuan(s.loose_price)) + ' / 只</span>' +
-      '<div class="step step--sm">' +
-        '<button type="button" data-id="' + s.id + '" data-k="' + kind + '" data-d="-1" aria-label="减少" disabled>−</button>' +
-        '<span class="n zero" id="' + kind + s.id + '">0</span>' +
-        '<button type="button" data-id="' + s.id + '" data-k="' + kind + '" data-d="1" aria-label="增加">+</button>' +
-      '</div>' +
-    '</div>'
+  function specById(id) {
+    for (var i = 0; i < specs.length; i++) {
+      if (String(specs[i].id) === String(id)) return specs[i]
+    }
+    return null
   }
 
-  // 从「8只装 母2.5两/公3.5两」里拆出两种规格的名字。
-  // 拆不出来就退回「母 / 公」，宁可糙一点也别显示成空白。
-  function splitLabel(label) {
-    var m = /(母[\d.]+两)\s*[\/／]\s*(公[\d.]+两)/.exec(String(label || ''))
-    if (m) return { female: m[1], male: m[2] }
-    var m2 = /(公[\d.]+两)\s*[\/／]\s*(母[\d.]+两)/.exec(String(label || ''))
-    if (m2) return { female: m2[2], male: m2[1] }
-    return { female: '母', male: '公' }
-  }
-
-  function countsOf(id) {
-    if (!free[id]) free[id] = { f: 0, m: 0 }
-    return free[id]
-  }
-
-  var MAX = 200
-
-  function bump(id, kind, d) {
-    var c = countsOf(id)
-    var key = kind === 'f' ? 'f' : 'm'
-    var v = c[key] + d
+  function bump(id, d) {
+    var v = (qty[id] || 0) + d
     if (v < 0) v = 0
     if (v > MAX) v = MAX
-    c[key] = v
-    refreshGroup(id)
+    qty[id] = v
+    refreshRow(specById(id))
     total()
   }
 
-  // 只改这一档的两个数字与提示，不重建整个列表：重建会让刚点的按钮换一个 DOM 节点，
+  // 只改这一行的数字与小计，不重建整个列表：重建会让刚点的按钮换一个 DOM 节点，
   // 连点时焦点和触摸态都会丢。
-  function refreshGroup(id) {
-    var s = packById(id)
-    if (!s || !s.pack_size) return
-    var c = countsOf(id)
-    setNum('f' + id, c.f)
-    setNum('m' + id, c.m)
-
-    var box = $('note' + id)
-    if (!box) return
-    var boxCount = Math.floor((c.f + c.m) / s.pack_size)
-    if (boxCount > 0) {
-      var saved = boxCount * (s.pack_size * s.loose_price - s.unit_price)
-      box.textContent = saved > 0
-        ? '这档凑满 ' + boxCount + ' 盒，按整盒价算，省 ' + yuan(saved)
-        : '这档凑满 ' + boxCount + ' 盒，按整盒价算'
-    } else {
-      box.textContent = ''
+  function refreshRow(s) {
+    if (!s) return
+    var v = qty[s.id] || 0
+    var el = $('n' + s.id)
+    if (el) {
+      el.textContent = v
+      el.className = 'n' + (v ? '' : ' zero')
+      var minus = el.parentNode.getElementsByTagName('button')[0]
+      if (minus) minus.disabled = !v
     }
-  }
-
-  function setNum(id, v) {
-    var el = $(id)
-    if (!el) return
-    el.textContent = v
-    el.className = 'n' + (v ? '' : ' zero')
-    var minus = el.parentNode.getElementsByTagName('button')[0]
-    if (minus) minus.disabled = !v
+    setText('sub' + s.id, v ? v + ' 只　' + yuan(lineAmount(v, s.unit_price_milli)) : '')
   }
 
   // ---------- 金额 ----------
 
-  // 一档买 n 只怎么算钱：整盒走套餐价，零头走散买价。和后端 splitPack 同一套算法，
-  // 两边算不一样的话，回执金额和页面显示就对不上。
-  function amountOf(s, n) {
-    if (!s.pack_size) return n * s.unit_price
-    var boxCount = Math.floor(n / s.pack_size)
-    var loose = n % s.pack_size
-    return boxCount * s.unit_price + loose * s.loose_price
-  }
-
-  // 两类选的东西合在一张单里：买 2 盒再加几只散的是常事，不该逼买家二选一。
-  // 同一档的整盒与散只分成两条 item 发给后端——后端按整盒价 + 散买价各算各的，
-  // 和合并成一条再拆的结果完全一样（8a+b 只拆出来就是 a 盒加 b 只）。
-  function packPick() {
-    var out = { crabs: 0, amount: 0, items: [], label: '' }
-    var s = packById(picked)
-    if (!s || !boxes) return out
-    var size = s.pack_size || 1
-    out.crabs = boxes * size
-    out.amount = boxes * s.unit_price
-    out.items.push({ spec_id: s.id, quantity: out.crabs })
-    out.label = packName(s) + ' ×' + boxes + (s.pack_size ? ' 盒' : ' ' + s.unit_text)
-    return out
-  }
-
-  function freePick() {
+  function picks() {
     var out = { crabs: 0, amount: 0, items: [] }
     for (var i = 0; i < specs.length; i++) {
-      var sp = specs[i]
-      if (!sp.pack_size) continue
-      var c = countsOf(sp.id)
-      var n = c.f + c.m
+      var s = specs[i]
+      var n = qty[s.id] || 0
       if (!n) continue
       out.crabs += n
-      out.amount += amountOf(sp, n)
-      out.items.push({ spec_id: sp.id, quantity: n, male_count: c.m })
+      out.amount += lineAmount(n, s.unit_price_milli)
+      out.items.push({ spec_id: s.id, quantity: n })
     }
     return out
-  }
-
-  function allPicks() {
-    var p = packPick()
-    var f = freePick()
-    return {
-      pack: p,
-      free: f,
-      crabs: p.crabs + f.crabs,
-      amount: p.amount + f.amount,
-      items: mergeItems(p.items.concat(f.items))
-    }
-  }
-
-  // 同一档在两边都选了就合成一条，否则明细会出现两行一模一样的 ×1，
-  // 卖家配货时得自己把它们加起来。金额不受影响：8a+b 只拆出来还是 a 盒加 b 只。
-  function mergeItems(items) {
-    var byId = {}
-    var order = []
-    for (var i = 0; i < items.length; i++) {
-      var it = items[i]
-      var key = String(it.spec_id)
-      if (!byId[key]) {
-        byId[key] = { spec_id: it.spec_id, quantity: 0, male_count: 0 }
-        order.push(key)
-      }
-      byId[key].quantity += it.quantity
-      byId[key].male_count += maleOfItem(it)
-    }
-    var out = []
-    for (var k = 0; k < order.length; k++) out.push(byId[order[k]])
-    return out
-  }
-
-  // 没写 male_count 的（套餐那条）按后端的默认值算：一半一半。
-  // 合并后要显式写出来，不然后端会按合并后的总数再取一半，和分开时不一定一样。
-  function maleOfItem(it) {
-    if (it.male_count != null) return it.male_count
-    return Math.floor(it.quantity / 2)
   }
 
   function total() {
     pickFail('')
-    var all = allPicks()
-
-    // 分项写出来：在自由搭配页签上也要看得见套餐那边选了什么，
-    // 否则合计凭空多出几百块，买家不知道哪来的
-    var html = ''
-    if (all.pack.crabs) {
-      html += '<div class="bd"><span class="k">套餐　' + esc(all.pack.label) + '</span>' +
-              '<span class="v">' + esc(yuan(all.pack.amount)) + '</span></div>'
-    }
-    if (all.free.crabs) {
-      html += '<div class="bd"><span class="k">散买　共 ' + all.free.crabs + ' 只</span>' +
-              '<span class="v">' + esc(yuan(all.free.amount)) + '</span></div>'
-    }
-    // 只有一类时不用分项，合计那行已经说完了
-    $('breakdown').innerHTML = (all.pack.crabs && all.free.crabs) ? html : ''
-
+    var all = picks()
     $('total').textContent = yuan(all.amount)
     $('count').textContent = all.crabs > 0 ? '· 共 ' + all.crabs + ' 只' : ''
   }
@@ -551,36 +330,38 @@ button.go:disabled{opacity:.45}
       }
       specs = body.data.list || []
       minQty = body.data.min_quantity || 0
+      packHint = body.data.pack_hint || 8
       if (!specs.length) {
         $('loading').textContent = '这会儿没有可登记的档，问一下再来'
         return
       }
       $('loading').style.display = 'none'
+      $('pickHint').style.display = ''
       setText('minNum', minQty)
 
-      picked = defaultPackId()
-      renderPacks()
-      syncBoxes()
+      // 默认给第二档放一盒的量（往年主推的那档），多数人不用动就能往下填
+      var first = defaultSpec()
+      if (first) qty[first.id] = packHint
       renderPicks()
       total()
     })
   }
 
-  // 默认落在第二档（¥269 那一档）：它是主推的，多数人不用动就能往下填。
-  // 价目表只有一档时就落在第一档。
-  function defaultPackId() {
-    var packs = []
+  // 第二个母蟹档；没有就第一个
+  function defaultSpec() {
+    var females = []
     for (var i = 0; i < specs.length; i++) {
-      if (specs[i].pack_size > 0) packs.push(specs[i])
+      if (specs[i].gender === 'female') females.push(specs[i])
     }
-    if (!packs.length) return specs[0].id
-    return (packs.length > 1 ? packs[1] : packs[0]).id
+    if (females.length > 1) return females[1]
+    return females[0] || specs[0] || null
   }
+
 
   // ---------- 提交 ----------
 
   function submit() {
-    var cur = allPicks()
+    var cur = picks()
     var name = $('name').value.trim()
     var phone = $('phone').value.trim()
     var addr = $('addr').value.trim()
@@ -660,14 +441,6 @@ button.go:disabled{opacity:.45}
   // 希望发货日期不能往回填，后端也会拦
   $('date').min = todayStr()
 
-  $('tabPack').addEventListener('click', function () { setTab('pack') })
-  $('tabFree').addEventListener('click', function () { setTab('free') })
-  $('boxMinus').addEventListener('click', function () {
-    if (boxes > 1) { boxes -= 1; syncBoxes(); total() }
-  })
-  $('boxPlus').addEventListener('click', function () {
-    if (boxes < 99) { boxes += 1; syncBoxes(); total() }
-  })
 
   goEl.addEventListener('click', submit)
   loadSpecs()

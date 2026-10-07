@@ -39,8 +39,8 @@ func sampleInput() CreateOrderInput {
 		WechatNick:   "老张",
 		WechatRemark: "同学介绍",
 		Items: []ItemInput{
-			{Gender: "male", SpecGram: 225, SpecLabel: "4.5两", Unit: "piece", Quantity: 5, UnitPrice: 8800},
-			{Gender: "female", SpecGram: 175, SpecLabel: "3.5两", Unit: "piece", Quantity: 5, UnitPrice: 6800},
+			{Gender: "male", SpecGram: 225, SpecLabel: "4.5两", Quantity: 5, UnitPriceMilli: 88000},
+			{Gender: "female", SpecGram: 175, SpecLabel: "3.5两", Quantity: 5, UnitPriceMilli: 68000},
 		},
 		FreightFee:     2000,
 		Discount:       1000,

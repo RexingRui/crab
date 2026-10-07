@@ -48,28 +48,35 @@ func (f flexTime) Ptr() *int64 { return f.ts }
 type itemReq struct {
 	Gender    model.Gender `json:"gender"`
 	SpecGram  int          `json:"spec_gram"`
+	Grade     model.Grade  `json:"grade"`
 	SpecLabel string       `json:"spec_label"`
-	Unit      model.Unit   `json:"unit"`
-	Quantity  int          `json:"quantity"`
-	UnitPrice int64        `json:"unit_price"`
-	// PackSize 按盒的明细一盒几只，可不传，后端会回价目表查。
-	PackSize int `json:"pack_size"`
+	Quantity  int          `json:"quantity"` // 只数
+	// UnitPriceMilli 单只价，单位「厘」（0.001 元）。卖家可以临时改价，所以由客户端给。
+	UnitPriceMilli int64 `json:"unit_price_milli"`
+	// LegacyUnitPrice 改版前的字段（单价，分）。解码器不拒绝未知字段，旧版小程序
+	// 带着它来会被当成单价 0 悄悄建单，所以专门接住它、明确报错。
+	LegacyUnitPrice *int64 `json:"unit_price"`
 }
 
-func toItemInputs(in []itemReq) []service.ItemInput {
+// errLegacyPrice 旧版客户端还在按「分」传单价。
+var errLegacyPrice = errs.InvalidParam("单价字段已改为 unit_price_milli（单只价，单位厘），请更新小程序后再试")
+
+func toItemInputs(in []itemReq) ([]service.ItemInput, error) {
 	out := make([]service.ItemInput, 0, len(in))
 	for _, it := range in {
+		if it.LegacyUnitPrice != nil {
+			return nil, errLegacyPrice
+		}
 		out = append(out, service.ItemInput{
-			Gender:    it.Gender,
-			SpecGram:  it.SpecGram,
-			SpecLabel: it.SpecLabel,
-			Unit:      it.Unit,
-			Quantity:  it.Quantity,
-			UnitPrice: it.UnitPrice,
-			PackSize:  it.PackSize,
+			Gender:         it.Gender,
+			SpecGram:       it.SpecGram,
+			Grade:          it.Grade,
+			SpecLabel:      it.SpecLabel,
+			Quantity:       it.Quantity,
+			UnitPriceMilli: it.UnitPriceMilli,
 		})
 	}
-	return out
+	return out, nil
 }
 
 type createOrderReq struct {
@@ -93,6 +100,11 @@ func (a *API) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, err)
 		return
 	}
+	items, err := toItemInputs(req.Items)
+	if err != nil {
+		Fail(w, r, err)
+		return
+	}
 
 	o, idempotent, err := a.orders.CreateOrder(r.Context(), service.CreateOrderInput{
 		RequestID:      req.RequestID,
@@ -101,7 +113,7 @@ func (a *API) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		Address:        req.Address,
 		WechatNick:     req.WechatNick,
 		WechatRemark:   req.WechatRemark,
-		Items:          toItemInputs(req.Items),
+		Items:          items,
 		FreightFee:     req.FreightFee,
 		Discount:       req.Discount,
 		ExpectShipDate: req.ExpectShipDate,
@@ -200,6 +212,11 @@ func (a *API) UpdateOrder(w http.ResponseWriter, r *http.Request) {
 	if p := req.UpdatedAt.Ptr(); p != nil {
 		expected = *p
 	}
+	items, err := toItemInputs(req.Items)
+	if err != nil {
+		Fail(w, r, err)
+		return
+	}
 
 	o, err := a.orders.UpdateOrder(r.Context(), service.UpdateOrderInput{
 		ID:                id,
@@ -208,7 +225,7 @@ func (a *API) UpdateOrder(w http.ResponseWriter, r *http.Request) {
 		Address:           req.Address,
 		WechatNick:        req.WechatNick,
 		WechatRemark:      req.WechatRemark,
-		Items:             toItemInputs(req.Items),
+		Items:             items,
 		FreightFee:        req.FreightFee,
 		Discount:          req.Discount,
 		ExpectShipDate:    req.ExpectShipDate,

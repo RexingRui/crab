@@ -76,18 +76,16 @@ func (a *API) PublicSpecs(w http.ResponseWriter, r *http.Request) {
 	OK(w, map[string]any{
 		"list":  out,
 		"total": len(out),
-		// 整单的起订只数。整盒买天然过线，页面据此校验「按只挑」那一档。
+		// 整单的起订只数，页面据此提示「几只起」。
 		"min_quantity": service.RegMinCrabs,
+		// 页面上「8 只 = xx 元」的那个 8：只是报价方式，数据里没有盒。
+		"pack_hint": PackHint,
 	})
 }
 
 type regItemReq struct {
-	SpecID int64 `json:"spec_id"`
-	// Quantity 这一档要几只。买家不填盒数——拆成几盒加几只散的由服务端算。
-	Quantity int `json:"quantity"`
-	// MaleCount 这一档里公的只数。指针是为了区分「没传」和「传了 0」：
-	// 没传用默认的一半一半，传 0 就是整档都要母的。
-	MaleCount *int `json:"male_count"`
+	SpecID   int64 `json:"spec_id"`
+	Quantity int   `json:"quantity"` // 这一档要几只
 }
 
 // publicRegisterReq 买家提交的登记。
@@ -124,9 +122,8 @@ func (a *API) PublicRegister(w http.ResponseWriter, r *http.Request) {
 	items := make([]service.RegistrationItemInput, 0, len(req.Items))
 	for _, it := range req.Items {
 		items = append(items, service.RegistrationItemInput{
-			SpecID:    it.SpecID,
-			Quantity:  it.Quantity,
-			MaleCount: it.MaleCount,
+			SpecID:   it.SpecID,
+			Quantity: it.Quantity,
 		})
 	}
 

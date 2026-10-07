@@ -41,7 +41,7 @@ function materialize(order) {
     freight_cost: null,
     freight_pending: order.ship_status !== 'cancelled',
     freight_seller_cap: 2000,
-    crab_count: (order.items || []).reduce((n, i) => n + (i.crab_count ?? i.quantity), 0),
+    crab_count: (order.items || []).reduce((n, i) => n + i.quantity, 0),
     payments: (order.payments || []).map((p) => ({ ...p, paid_at: stamp(p.day_offset, p.time) })),
     logs: (order.logs || []).map((l) => ({ ...l, created_at: stamp(l.day_offset, l.time) }))
   }
@@ -119,7 +119,7 @@ function dashboard() {
       order_count: live.length,
       payable_total: live.reduce((sum, o) => sum + o.payable_amount, 0),
       paid_total: live.reduce((sum, o) => sum + o.paid_amount, 0),
-      crab_count: live.reduce((sum, o) => sum + o.items.reduce((n, i) => n + (i.crab_count ?? i.quantity), 0), 0),
+      crab_count: live.reduce((sum, o) => sum + o.items.reduce((n, i) => n + i.quantity, 0), 0),
       by_spec: []
     }
   }

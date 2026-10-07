@@ -5,7 +5,7 @@ import DemoBanner from '../DemoBanner'
 import SpecPicker from '../SpecPicker'
 import api from '../../utils/api'
 import { parseAddress, looksLikeAddressText } from '../../utils/address'
-import { fenToYuan, yuanToFen, todayStr, itemName } from '../../utils/format'
+import { fenToYuan, yuanToFen, todayStr, itemName, milliToYuan, lineAmount } from '../../utils/format'
 import { openidTail, whenReady } from '../../utils/session'
 import { guardDemo } from '../../hooks/useDemoMode'
 import { toast } from '../../utils/request'
@@ -129,7 +129,7 @@ export default function OrderForm({ orderId, clipboardTick = 0 }) {
 
   // 前端只做展示计算，最终金额以后端返回为准
   const preview = useMemo(() => {
-    const crabTotal = items.reduce((sum, it) => sum + it.unit_price * it.quantity, 0)
+    const crabTotal = items.reduce((sum, it) => sum + lineAmount(it.quantity, it.unit_price_milli), 0)
     return crabTotal + yuanToFen(form.freight_fee) - yuanToFen(form.discount)
   }, [items, form.freight_fee, form.discount])
 
@@ -158,11 +158,10 @@ export default function OrderForm({ orderId, clipboardTick = 0 }) {
         items: items.map((it) => ({
           gender: it.gender,
           spec_gram: it.spec_gram,
+          grade: it.grade || 'normal',
           spec_label: it.spec_label,
-          unit: it.unit,
           quantity: it.quantity,
-          unit_price: it.unit_price,
-          pack_size: it.pack_size || 0
+          unit_price_milli: it.unit_price_milli
         })),
         freight_fee: yuanToFen(form.freight_fee),
         discount: yuanToFen(form.discount),
@@ -263,8 +262,8 @@ export default function OrderForm({ orderId, clipboardTick = 0 }) {
               <View className='record__item' key={`${it.spec_label}-${index}`}>
                 <Text className='record__item-name'>{itemName(it)}</Text>
                 <Text className='record__item-qty num'>×{it.quantity}</Text>
-                <Text className='record__item-price num'>{fenToYuan(it.unit_price)}</Text>
-                <Text className='record__item-amount num'>{fenToYuan(it.unit_price * it.quantity)}</Text>
+                <Text className='record__item-price num'>{milliToYuan(it.unit_price_milli)}</Text>
+                <Text className='record__item-amount num'>{fenToYuan(lineAmount(it.quantity, it.unit_price_milli))}</Text>
                 <Text className='record__item-del' onClick={() => removeItem(index)}>删</Text>
               </View>
             ))

@@ -23,8 +23,11 @@ describe('freightProblem', () => {
   it('按原价要有原价', () => {
     expect(freightProblem({ basis: 'list', listFen: 0, costFen: 3000, buyerFen: 0 })).toMatch('原价')
   })
-  it('买家补的不能超过口径金额', () => {
-    expect(freightProblem({ basis: 'actual', listFen: 0, costFen: 3000, buyerFen: 3100 })).toMatch('实付')
+  it('买家补的可以超过实付和原价（大额券寄的单）', () => {
+    expect(freightProblem({ basis: 'actual', listFen: 5800, costFen: 4000, buyerFen: 6000 })).toBe('')
+  })
+  it('买家补的不能是负数', () => {
+    expect(freightProblem({ basis: 'actual', listFen: 0, costFen: 3000, buyerFen: -1 })).toBeTruthy()
   })
   it('正常情况没问题', () => {
     expect(freightProblem({ basis: 'actual', listFen: 7500, costFen: 6000, buyerFen: 2000 })).toBe('')

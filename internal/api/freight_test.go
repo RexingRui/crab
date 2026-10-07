@@ -18,8 +18,8 @@ func TestFreightAPI(t *testing.T) {
 	body["freight_fee"] = 0
 	body["discount"] = 0
 	body["items"] = []map[string]any{{
-		"gender": "mixed", "spec_gram": sp.SpecGram, "spec_label": sp.SpecLabel,
-		"unit": "box", "quantity": 2, "unit_price": sp.UnitPrice, "pack_size": sp.PackSize,
+		"gender": sp.Gender, "spec_gram": sp.SpecGram, "spec_label": sp.SpecLabel,
+		"quantity": 16, "unit_price_milli": sp.UnitPriceMilli,
 	}}
 	o := decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", body))
 	if !o.FreightPending || o.FreightSellerCap != 4000 || o.CrabCount != 16 || o.FreightDefaultBasis != "actual" {
@@ -86,7 +86,7 @@ func TestFreightHiddenFromBuyer(t *testing.T) {
 	e := newTestEnv(t)
 	sp := e.publicSpecIDs(t)[0]
 
-	_, _, reg := e.register(t, registerBody(e.regLink(t, ""), sp.ID, sp.PackSize, "13900139050"))
+	_, _, reg := e.register(t, registerBody(e.regLink(t, ""), sp.ID, PackHint, "13900139050"))
 	var r RegistrationDTO
 	if err := json.Unmarshal(reg, &r); err != nil {
 		t.Fatalf("解析回执失败: %v", err)

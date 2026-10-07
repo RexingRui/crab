@@ -8,12 +8,13 @@ export function suggestBuyerFee(sellerCap, basis, listFen, costFen) {
   return Math.max(0, amount - (sellerCap || 0))
 }
 
-/** 按原价算却没填原价、或实付没填，都不能提交。返回出错原因，没问题返回空串。 */
+/** 按原价算却没填原价、或实付没填，都不能提交。返回出错原因，没问题返回空串。
+ *
+ * 买家补的可以超过实付、甚至超过原价：券是卖家花钱买的，用大额券寄的单实付很低，
+ * 买家照常补运费。和后端一样，只拦负数。 */
 export function freightProblem({ basis, listFen, costFen, buyerFen }) {
   if (!costFen && costFen !== 0) return '实付运费还没填'
   if (costFen < 0 || listFen < 0 || buyerFen < 0) return '金额不能是负数'
   if (basis === 'list' && !listFen) return '按原价算，要先填原价'
-  const cap = basis === 'list' ? listFen : costFen
-  if (buyerFen > cap) return `买家补的不能超过${basis === 'list' ? '原价' : '实付'}`
   return ''
 }

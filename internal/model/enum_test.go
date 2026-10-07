@@ -85,8 +85,12 @@ func TestEnumValidAndText(t *testing.T) {
 	if !GenderMale.Valid() || Gender("x").Valid() {
 		t.Error("Gender.Valid 判断错误")
 	}
-	if !UnitPiece.Valid() || Unit("x").Valid() {
-		t.Error("Unit.Valid 判断错误")
+	// 混装只留在改版前的老明细里，新规格、新明细不收
+	if GenderMixed.Valid() {
+		t.Error("mixed 不该再是合法的性别")
+	}
+	if !GradeBroken.Valid() || Grade("x").Valid() {
+		t.Error("Grade.Valid 判断错误")
 	}
 	if !PayMethodWechat.Valid() || PayMethod("btc").Valid() {
 		t.Error("PayMethod.Valid 判断错误")
@@ -94,7 +98,7 @@ func TestEnumValidAndText(t *testing.T) {
 	if GenderMale.Text() != "公" || GenderFemale.Text() != "母" {
 		t.Error("Gender.Text 翻译错误")
 	}
-	if UnitPiece.Text() != "只" || ShipShipped.Text() != "已发货" {
+	if GradeBroken.Text() != "残蟹" || ShipShipped.Text() != "已发货" {
 		t.Error("Text 翻译错误")
 	}
 }

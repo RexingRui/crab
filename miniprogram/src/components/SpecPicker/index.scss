@@ -45,6 +45,7 @@
 
   &__size { display: block; font-size: 26px; }
   &__price { display: block; font-size: 24px; color: $muted; margin-top: 6px; }
+  &__unit { display: block; font-size: 20px; color: $muted; margin-top: 2px; }
 
   &__line {
     display: flex;

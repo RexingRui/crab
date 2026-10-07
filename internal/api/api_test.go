@@ -161,8 +161,8 @@ func sampleOrderBody() map[string]any {
 		"wechat_nick":   "老张",
 		"wechat_remark": "同学介绍",
 		"items": []map[string]any{
-			{"gender": "male", "spec_gram": 225, "spec_label": "4.5两", "unit": "piece", "quantity": 5, "unit_price": 8800},
-			{"gender": "female", "spec_gram": 175, "spec_label": "3.5两", "unit": "piece", "quantity": 5, "unit_price": 6800},
+			{"gender": "male", "spec_gram": 225, "spec_label": "4.5两", "quantity": 5, "unit_price_milli": 88000},
+			{"gender": "female", "spec_gram": 175, "spec_label": "3.5两", "quantity": 5, "unit_price_milli": 68000},
 		},
 		"freight_fee":      2000,
 		"discount":         1000,
@@ -195,7 +195,8 @@ func TestOrderLifecycle(t *testing.T) {
 	if created.GoodsAmount != 78000 || created.ShipStatus != "pending" || created.PayStatus != "unpaid" {
 		t.Errorf("建单结果不对: %+v", created)
 	}
-	if created.Items[0].GenderText != "公" || created.Items[0].UnitText != "只" {
+	if created.Items[0].GenderText != "公" || created.Items[0].Title != "公4.5两" ||
+		created.Items[0].UnitPriceYuan != "88.00" || created.Items[0].GradeText != "正常" {
 		t.Errorf("中文展示字段不对: %+v", created.Items[0])
 	}
 	if created.ShipTime != nil || created.SettledTime != nil {
@@ -572,47 +573,56 @@ func TestSpecsAndAddresses(t *testing.T) {
 	if err := json.Unmarshal(data, &specs); err != nil {
 		t.Fatalf("解析规格失败: %v", err)
 	}
-	// 种子价目表是 4 档套餐（8 只装，四个价位）
-	if specs.Total != 4 {
-		t.Fatalf("种子数据应有 4 档，实际 %d", specs.Total)
+	// 种子价目表按只计价：母 2.5-4 两、公 3.5-5 两共 8 档，每档 8 只正好是去年的整盒价
+	if specs.Total != 8 {
+		t.Fatalf("种子数据应有 8 档，实际 %d", specs.Total)
 	}
+	packs := map[string]bool{"189.00": true, "269.00": true, "359.00": true, "439.00": true}
 	for _, sp := range specs.List {
-		if sp.PackSize != 8 || sp.Unit != "box" {
-			t.Fatalf("种子档应是 8 只装的盒装，实际 %+v", sp)
+		if !packs[sp.PackHintAmountYuan] || sp.Grade != "normal" {
+			t.Fatalf("种子档不对: %+v", sp)
 		}
 	}
 
-	// 新增
+	// 新增一档残蟹（同克重的正常档已经在种子里了，品相不同就是另一档）
 	created := e.mustOK(t, http.MethodPost, "/api/specs", map[string]any{
-		"gender": "male", "spec_gram": 300, "spec_label": "6.0两", "unit": "piece", "unit_price": 16800,
+		"gender": "female", "spec_gram": 150, "grade": "broken", "spec_label": "3两", "unit_price_milli": 20500,
 	})
 	var sp SpecDTO
 	if err := json.Unmarshal(created, &sp); err != nil {
 		t.Fatalf("解析新增规格失败: %v", err)
 	}
-	if sp.UnitPriceYuan != "168.00" || !sp.Enabled {
+	if sp.UnitPriceYuan != "20.50" || sp.Title != "母3两(残)" || sp.PackHintAmountYuan != "164.00" || !sp.Enabled {
 		t.Errorf("新增规格不对: %+v", sp)
 	}
 
-	// 重复新增 → 40001
+	// 重复新增（同 性别 + 克重 + 品相）→ 40001
 	status, resp, _ := e.call(t, http.MethodPost, "/api/specs", map[string]any{
-		"gender": "male", "spec_gram": 300, "spec_label": "6.0两", "unit": "piece", "unit_price": 16800,
+		"gender": "female", "spec_gram": 150, "grade": "broken", "spec_label": "3两", "unit_price_milli": 1,
 	})
 	if status != http.StatusBadRequest || resp.Code != errs.CodeInvalidParam {
 		t.Errorf("重复规格期望 400/40001，实际 %d/%d", status, resp.Code)
+	}
+
+	// 旧版客户端还按「分」传 unit_price → 明确报错，不能当成单价 0 收下
+	status, resp, _ = e.call(t, http.MethodPost, "/api/specs", map[string]any{
+		"gender": "male", "spec_gram": 300, "spec_label": "6两", "unit_price": 16800,
+	})
+	if status != http.StatusBadRequest || resp.Code != errs.CodeInvalidParam {
+		t.Errorf("旧字段 unit_price 期望 400/40001，实际 %d/%d", status, resp.Code)
 	}
 
 	// 停用
 	e.mustOK(t, http.MethodDelete, "/api/specs/"+itoa(sp.ID), nil)
 	data = e.mustOK(t, http.MethodGet, "/api/specs", nil)
 	_ = json.Unmarshal(data, &specs)
-	if specs.Total != 4 {
-		t.Errorf("停用后默认列表应仍是 4 档，实际 %d", specs.Total)
+	if specs.Total != 8 {
+		t.Errorf("停用后默认列表应仍是 8 档，实际 %d", specs.Total)
 	}
 	data = e.mustOK(t, http.MethodGet, "/api/specs?all=1", nil)
 	_ = json.Unmarshal(data, &specs)
-	if specs.Total != 5 {
-		t.Errorf("all=1 应返回 5 档，实际 %d", specs.Total)
+	if specs.Total != 9 {
+		t.Errorf("all=1 应返回 9 档，实际 %d", specs.Total)
 	}
 
 	// 地址簿：下过单之后才有
@@ -635,24 +645,33 @@ func TestSpecPriceChangeDoesNotAffectHistory(t *testing.T) {
 	e := newTestEnv(t)
 	old := decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", sampleOrderBody()))
 
-	// 建一档和历史订单明细对得上的规格（公 4.5 两，88 元），再把它涨到 95 元
-	created := e.mustOK(t, http.MethodPost, "/api/specs", map[string]any{
-		"gender": "male", "spec_gram": 225, "spec_label": "4.5两", "unit": "piece", "unit_price": 8800,
-	})
-	var target SpecDTO
-	if err := json.Unmarshal(created, &target); err != nil {
+	// 种子里就有和历史订单明细对得上的规格（公 4.5 两），把它涨到 95 元一只
+	data := e.mustOK(t, http.MethodGet, "/api/specs", nil)
+	var specs struct {
+		List []SpecDTO `json:"list"`
+	}
+	if err := json.Unmarshal(data, &specs); err != nil {
 		t.Fatalf("解析规格失败: %v", err)
+	}
+	var target SpecDTO
+	for _, sp := range specs.List {
+		if sp.Gender == "male" && sp.SpecGram == 225 {
+			target = sp
+		}
+	}
+	if target.ID == 0 {
+		t.Fatal("种子里没有公 4.5 两")
 	}
 
 	e.mustOK(t, http.MethodPut, "/api/specs/"+itoa(target.ID), map[string]any{
-		"gender": target.Gender, "spec_gram": target.SpecGram, "spec_label": target.SpecLabel,
-		"unit": target.Unit, "unit_price": 9500, // 88 元涨到 95 元
+		"gender": target.Gender, "spec_gram": target.SpecGram, "grade": target.Grade,
+		"spec_label": target.SpecLabel, "unit_price_milli": 95000,
 	})
 
 	again := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/"+itoa(old.ID), nil))
-	if again.Items[0].UnitPrice != 8800 || again.PayableAmount != 79000 {
-		t.Errorf("改价后历史订单被改动了: unit_price=%d payable=%d",
-			again.Items[0].UnitPrice, again.PayableAmount)
+	if again.Items[0].UnitPriceMilli != 88000 || again.PayableAmount != 79000 {
+		t.Errorf("改价后历史订单被改动了: unit_price_milli=%d payable=%d",
+			again.Items[0].UnitPriceMilli, again.PayableAmount)
 	}
 }
 
@@ -718,4 +737,28 @@ func TestRequestIDHeader(t *testing.T) {
 
 func itoa(n int64) string {
 	return strconv.FormatInt(n, 10)
+}
+
+// TestOrderRejectsLegacyUnitPrice 旧版小程序还按「分」传 unit_price：明确报错，
+// 不能因为解码器忽略未知字段，就当成单价 0 悄悄建一笔 0 元的单。
+func TestOrderRejectsLegacyUnitPrice(t *testing.T) {
+	e := newTestEnv(t)
+	body := sampleOrderBody()
+	body["items"] = []map[string]any{
+		{"gender": "male", "spec_gram": 225, "spec_label": "4.5两", "quantity": 5, "unit_price": 8800},
+	}
+	status, resp, _ := e.call(t, http.MethodPost, "/api/orders", body)
+	if status != http.StatusBadRequest || resp.Code != errs.CodeInvalidParam {
+		t.Fatalf("旧字段期望 400/40001，实际 %d/%d", status, resp.Code)
+	}
+
+	// 散买零头向上取整到元：5 只 × 23.625 = 118.125 → 119
+	body["items"] = []map[string]any{
+		{"gender": "female", "spec_gram": 125, "spec_label": "2.5两", "quantity": 5, "unit_price_milli": 23625},
+	}
+	body["freight_fee"], body["discount"] = 0, 0
+	o := decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", body))
+	if o.GoodsAmount != 11900 || o.Items[0].AmountYuan != "119.00" || o.Items[0].UnitPriceYuan != "23.625" {
+		t.Fatalf("散买金额不对: goods=%d item=%+v", o.GoodsAmount, o.Items[0])
+	}
 }

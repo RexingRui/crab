@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   fenToYuan, yuanToFen, overdueDays, statusText, statusColor, maskPhone, maskName, formatDate,
-  itemName
+  itemName,
+  milliToYuan,
+  yuanToMilli,
+  lineAmount,
+  PACK_HINT
 } from '../format'
 
 describe('金额换算走整数运算', () => {
@@ -67,19 +71,46 @@ describe('脱敏', () => {
 })
 
 describe('itemName', () => {
-  it('套餐不加「公母」前缀，档名本来就写了盒里装什么', () => {
+  it('后端给了 title 就用 title', () => {
+    expect(itemName({ title: '母3两(残)', gender: 'female', spec_label: '3两' })).toBe('母3两(残)')
+  })
+
+  it('没有 title 时自己拼：性别 + 规格 + 残蟹标记', () => {
+    expect(itemName({ gender: 'male', gender_text: '公', spec_label: '4.5两' })).toBe('公4.5两')
+    expect(itemName({ gender: 'female', gender_text: '母', spec_label: '3两', grade: 'broken' })).toBe('母3两(残)')
+  })
+
+  it('改版前的混装老明细不加「公母」前缀', () => {
     expect(itemName({
       gender: 'mixed', gender_text: '公母',
       spec_label: '8只装 母2.5两/公3.5两（公6母2）'
     })).toBe('8只装 母2.5两/公3.5两（公6母2）')
   })
 
-  it('按只卖的照旧带前缀', () => {
-    expect(itemName({ gender: 'male', gender_text: '公', spec_label: '4.5两' })).toBe('公 4.5两')
-  })
-
   it('空值不炸', () => {
     expect(itemName(null)).toBe('')
     expect(itemName({ gender: 'female', spec_label: '3.5两' })).toBe('3.5两')
+  })
+})
+
+describe('按只计价', () => {
+  it('厘 ↔ 元', () => {
+    expect(milliToYuan(23625)).toBe('¥23.625')
+    expect(milliToYuan(35000, { symbol: false })).toBe('35.00')
+    expect(milliToYuan(33600, { symbol: false })).toBe('33.60')
+    expect(yuanToMilli('23.625')).toBe(23625)
+    expect(yuanToMilli('35')).toBe(35000)
+    expect(yuanToMilli('33.6')).toBe(33600)
+    expect(yuanToMilli('1.23456')).toBe(1234)
+    expect(yuanToMilli('')).toBe(0)
+  })
+
+  it('和后端同一个公式：只数 × 单只价，向上取整到元', () => {
+    expect(lineAmount(8, 23625)).toBe(18900)
+    expect(lineAmount(16, 33625)).toBe(53800)
+    expect(lineAmount(5, 23625)).toBe(11900)
+    expect(lineAmount(5, 35000)).toBe(17500)
+    expect(lineAmount(0, 23625)).toBe(0)
+    expect(PACK_HINT).toBe(8)
   })
 })

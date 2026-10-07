@@ -36,9 +36,9 @@ func (s *OrderService) SetClock(f func() int64) { s.now = f }
 
 // ========== 纯计算函数（可单测，不碰数据库） ==========
 
-// CalcItemAmount 明细金额 = 数量 × 单价，全整数运算。
-func CalcItemAmount(quantity int, unitPrice int64) int64 {
-	return int64(quantity) * unitPrice
+// CalcItemAmount 明细金额（分）= 只数 × 单只价（厘），向上取整到元。全整数运算。
+func CalcItemAmount(quantity int, unitPriceMilli int64) int64 {
+	return model.LineAmount(quantity, unitPriceMilli)
 }
 
 // CalcGoodsAmount 货款 = Σ 明细金额。
@@ -57,16 +57,15 @@ func CalcPayableAmount(goods, freight, discount int64) int64 {
 
 // ========== 入参 ==========
 
+// ItemInput 一行明细：哪种蟹、几只、一只多少钱。
 type ItemInput struct {
 	Gender    model.Gender
 	SpecGram  int
+	Grade     model.Grade // 空串按正常处理
 	SpecLabel string
-	Unit      model.Unit
-	Quantity  int
-	UnitPrice int64
-	// PackSize 一盒几只，只对按盒的明细有意义，用来折算 CrabCount。
-	// 录单时客户端可以不传，由 fillPackSizes 回价目表查。
-	PackSize int
+	Quantity  int // 只数
+	// UnitPriceMilli 单只价，单位「厘」。卖家录单可以临时改价，买家登记由服务端回查价目表填。
+	UnitPriceMilli int64
 }
 
 type CreateOrderInput struct {
@@ -126,14 +125,14 @@ func buildItems(in []ItemInput) ([]model.OrderItem, error) {
 	out := make([]model.OrderItem, 0, len(in))
 	for i, it := range in {
 		if !it.Gender.Valid() {
-			return nil, errs.InvalidParam("items[%d].gender 非法，应为 male/female/mixed", i)
+			return nil, errs.InvalidParam("items[%d].gender 非法，应为 male/female", i)
 		}
-		unit := it.Unit
-		if unit == "" {
-			unit = model.UnitPiece
+		grade := it.Grade
+		if grade == "" {
+			grade = model.GradeNormal
 		}
-		if !unit.Valid() {
-			return nil, errs.InvalidParam("items[%d].unit 非法，应为 piece/box/jin", i)
+		if !grade.Valid() {
+			return nil, errs.InvalidParam("items[%d].grade 非法，应为 normal/broken", i)
 		}
 		if it.SpecGram <= 0 {
 			return nil, errs.InvalidParam("items[%d].spec_gram 必须大于 0", i)
@@ -144,65 +143,21 @@ func buildItems(in []ItemInput) ([]model.OrderItem, error) {
 		if it.Quantity < 1 {
 			return nil, errs.InvalidParam("items[%d].quantity 必须大于等于 1", i)
 		}
-		if it.UnitPrice < 0 {
-			return nil, errs.InvalidParam("items[%d].unit_price 不能为负", i)
+		if it.UnitPriceMilli < 0 {
+			return nil, errs.InvalidParam("items[%d].unit_price_milli 不能为负", i)
 		}
 		out = append(out, model.OrderItem{
-			Gender:    it.Gender,
-			SpecGram:  it.SpecGram,
-			SpecLabel: it.SpecLabel,
-			Unit:      unit,
-			Quantity:  it.Quantity,
-			UnitPrice: it.UnitPrice,
-			Amount:    CalcItemAmount(it.Quantity, it.UnitPrice),
-			CrabCount: itemCrabCount(unit, it.Quantity, it.PackSize),
-			SortNo:    i,
+			Gender:         it.Gender,
+			SpecGram:       it.SpecGram,
+			Grade:          grade,
+			SpecLabel:      it.SpecLabel,
+			Quantity:       it.Quantity,
+			UnitPriceMilli: it.UnitPriceMilli,
+			Amount:         CalcItemAmount(it.Quantity, it.UnitPriceMilli),
+			SortNo:         i,
 		})
 	}
 	return out, nil
-}
-
-// itemCrabCount 一行明细折合多少只。按斤卖的折不出只数，记 0。
-func itemCrabCount(unit model.Unit, quantity, packSize int) int {
-	switch unit {
-	case model.UnitPiece:
-		return quantity
-	case model.UnitBox:
-		return quantity * packSize
-	}
-	return 0
-}
-
-// fillPackSizes 给没带每盒只数的按盒明细补上：按「性别 + 克重 + 单位」回价目表找。
-// 找不到（那一档已经删了）就留 0，这一行折不出只数，不拦着建单。
-func (s *OrderService) fillPackSizes(ctx context.Context, in []ItemInput) error {
-	need := false
-	for _, it := range in {
-		if it.Unit == model.UnitBox && it.PackSize <= 0 {
-			need = true
-			break
-		}
-	}
-	if !need {
-		return nil
-	}
-	specs, err := s.st.ListSpecs(ctx, false)
-	if err != nil {
-		return errs.Internal(err)
-	}
-	for i := range in {
-		it := &in[i]
-		if it.Unit != model.UnitBox || it.PackSize > 0 {
-			continue
-		}
-		for _, sp := range specs {
-			if sp.Unit == model.UnitBox && sp.Gender == it.Gender && sp.SpecGram == it.SpecGram {
-				it.PackSize = sp.PackSize
-				break
-			}
-		}
-	}
-	return nil
 }
 
 // validateMoney 校验运费、优惠，并返回货款与应收。
@@ -232,9 +187,6 @@ func validateExpectDate(d string) error {
 // CreateOrder 创建订单。返回的第二个值表示是否命中幂等（已存在同 request_id 的订单）。
 func (s *OrderService) CreateOrder(ctx context.Context, in CreateOrderInput) (*model.Order, bool, error) {
 	if err := validateReceiver(in.ReceiverName, in.Phone, in.Address); err != nil {
-		return nil, false, err
-	}
-	if err := s.fillPackSizes(ctx, in.Items); err != nil {
 		return nil, false, err
 	}
 	items, err := buildItems(in.Items)
@@ -412,9 +364,6 @@ func (s *OrderService) attachItems(ctx context.Context, list []*model.Order) err
 
 func (s *OrderService) UpdateOrder(ctx context.Context, in UpdateOrderInput) (*model.Order, error) {
 	if err := validateReceiver(in.ReceiverName, in.Phone, in.Address); err != nil {
-		return nil, err
-	}
-	if err := s.fillPackSizes(ctx, in.Items); err != nil {
 		return nil, err
 	}
 	items, err := buildItems(in.Items)
@@ -935,15 +884,10 @@ func applyFreight(o *model.Order, in FreightInput) error {
 	if in.BuyerFee != nil {
 		buyer = *in.BuyerFee
 	}
+	// 买家补的可以超过快递实付、甚至超过原价：券是卖家花钱买的，用大额券寄的单
+	// 实付很低，但买家照常补运费。所以这里只拦负数。
 	if buyer < 0 {
 		return errs.InvalidParam("买家承担的运费不能为负")
-	}
-	if buyer > basisAmount {
-		what := "实付"
-		if basis == model.FreightBasisList {
-			what = "原价"
-		}
-		return errs.InvalidParam("买家承担的运费不能超过快递%s", what)
 	}
 
 	_, payable, err := validateMoney(o.Items, buyer, o.Discount)

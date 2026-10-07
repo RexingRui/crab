@@ -105,12 +105,14 @@ type Gender string
 const (
 	GenderMale   Gender = "male"
 	GenderFemale Gender = "female"
-	GenderMixed  Gender = "mixed"
+	// GenderMixed 只出现在改版前的老明细里（当时的「公母混装套餐」）。
+	// 新规格、新明细一律按只记公或母，混装就是公母各一行。
+	GenderMixed Gender = "mixed"
 )
 
 func (g Gender) Valid() bool {
 	switch g {
-	case GenderMale, GenderFemale, GenderMixed:
+	case GenderMale, GenderFemale:
 		return true
 	}
 	return false
@@ -128,34 +130,32 @@ func (g Gender) Text() string {
 	return string(g)
 }
 
-// ========== 计量单位 ==========
+// ========== 品相 ==========
 
-type Unit string
+// Grade 品相。同一性别、同一克重的蟹，正常的和残蟹（断脚等）分开定价。
+type Grade string
 
 const (
-	UnitPiece Unit = "piece"
-	UnitBox   Unit = "box"
-	UnitJin   Unit = "jin"
+	GradeNormal Grade = "normal"
+	GradeBroken Grade = "broken"
 )
 
-func (u Unit) Valid() bool {
-	switch u {
-	case UnitPiece, UnitBox, UnitJin:
+func (g Grade) Valid() bool {
+	switch g {
+	case GradeNormal, GradeBroken:
 		return true
 	}
 	return false
 }
 
-func (u Unit) Text() string {
-	switch u {
-	case UnitPiece:
-		return "只"
-	case UnitBox:
-		return "盒"
-	case UnitJin:
-		return "斤"
+func (g Grade) Text() string {
+	switch g {
+	case GradeNormal:
+		return "正常"
+	case GradeBroken:
+		return "残蟹"
 	}
-	return string(u)
+	return string(g)
 }
 
 // ========== 收款方式 ==========

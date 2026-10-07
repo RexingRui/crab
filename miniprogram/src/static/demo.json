@@ -7,11 +7,15 @@
       "gender_text": "公",
       "spec_gram": 125,
       "spec_label": "2.5两",
-      "unit": "piece",
-      "unit_text": "只",
-      "unit_price": 3800,
       "enabled": true,
-      "sort_no": 1
+      "sort_no": 1,
+      "unit_price_milli": 38000,
+      "unit_price_yuan": "38.00",
+      "grade": "normal",
+      "grade_text": "正常",
+      "title": "公2.5两",
+      "pack_hint_amount": 30400,
+      "pack_hint_amount_yuan": "304.00"
     },
     {
       "id": 2,
@@ -19,11 +23,15 @@
       "gender_text": "公",
       "spec_gram": 175,
       "spec_label": "3.5两",
-      "unit": "piece",
-      "unit_text": "只",
-      "unit_price": 5800,
       "enabled": true,
-      "sort_no": 2
+      "sort_no": 2,
+      "unit_price_milli": 58000,
+      "unit_price_yuan": "58.00",
+      "grade": "normal",
+      "grade_text": "正常",
+      "title": "公3.5两",
+      "pack_hint_amount": 46400,
+      "pack_hint_amount_yuan": "464.00"
     },
     {
       "id": 3,
@@ -31,11 +39,15 @@
       "gender_text": "公",
       "spec_gram": 225,
       "spec_label": "4.5两",
-      "unit": "piece",
-      "unit_text": "只",
-      "unit_price": 8800,
       "enabled": true,
-      "sort_no": 3
+      "sort_no": 3,
+      "unit_price_milli": 88000,
+      "unit_price_yuan": "88.00",
+      "grade": "normal",
+      "grade_text": "正常",
+      "title": "公4.5两",
+      "pack_hint_amount": 70400,
+      "pack_hint_amount_yuan": "704.00"
     },
     {
       "id": 4,
@@ -43,11 +55,15 @@
       "gender_text": "公",
       "spec_gram": 275,
       "spec_label": "5.5两",
-      "unit": "piece",
-      "unit_text": "只",
-      "unit_price": 13800,
       "enabled": true,
-      "sort_no": 4
+      "sort_no": 4,
+      "unit_price_milli": 138000,
+      "unit_price_yuan": "138.00",
+      "grade": "normal",
+      "grade_text": "正常",
+      "title": "公5.5两",
+      "pack_hint_amount": 110400,
+      "pack_hint_amount_yuan": "1104.00"
     },
     {
       "id": 5,
@@ -55,11 +71,15 @@
       "gender_text": "母",
       "spec_gram": 125,
       "spec_label": "2.5两",
-      "unit": "piece",
-      "unit_text": "只",
-      "unit_price": 3800,
       "enabled": true,
-      "sort_no": 5
+      "sort_no": 5,
+      "unit_price_milli": 38000,
+      "unit_price_yuan": "38.00",
+      "grade": "normal",
+      "grade_text": "正常",
+      "title": "母2.5两",
+      "pack_hint_amount": 30400,
+      "pack_hint_amount_yuan": "304.00"
     },
     {
       "id": 6,
@@ -67,11 +87,15 @@
       "gender_text": "母",
       "spec_gram": 175,
       "spec_label": "3.5两",
-      "unit": "piece",
-      "unit_text": "只",
-      "unit_price": 5800,
       "enabled": true,
-      "sort_no": 6
+      "sort_no": 6,
+      "unit_price_milli": 58000,
+      "unit_price_yuan": "58.00",
+      "grade": "normal",
+      "grade_text": "正常",
+      "title": "母3.5两",
+      "pack_hint_amount": 46400,
+      "pack_hint_amount_yuan": "464.00"
     },
     {
       "id": 7,
@@ -79,11 +103,15 @@
       "gender_text": "母",
       "spec_gram": 225,
       "spec_label": "4.5两",
-      "unit": "piece",
-      "unit_text": "只",
-      "unit_price": 8800,
       "enabled": true,
-      "sort_no": 7
+      "sort_no": 7,
+      "unit_price_milli": 88000,
+      "unit_price_yuan": "88.00",
+      "grade": "normal",
+      "grade_text": "正常",
+      "title": "母4.5两",
+      "pack_hint_amount": 70400,
+      "pack_hint_amount_yuan": "704.00"
     },
     {
       "id": 8,
@@ -91,11 +119,15 @@
       "gender_text": "母",
       "spec_gram": 275,
       "spec_label": "5.5两",
-      "unit": "piece",
-      "unit_text": "只",
-      "unit_price": 13800,
       "enabled": true,
-      "sort_no": 8
+      "sort_no": 8,
+      "unit_price_milli": 138000,
+      "unit_price_yuan": "138.00",
+      "grade": "normal",
+      "grade_text": "正常",
+      "title": "母5.5两",
+      "pack_hint_amount": 110400,
+      "pack_hint_amount_yuan": "1104.00"
     }
   ],
   "orders": [
@@ -114,11 +146,13 @@
           "gender_text": "公",
           "spec_gram": 225,
           "spec_label": "4.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 5,
-          "unit_price": 8800,
-          "amount": 44000
+          "amount": 44000,
+          "unit_price_milli": 88000,
+          "unit_price_yuan": "88.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "公4.5两"
         },
         {
           "id": 2,
@@ -126,11 +160,13 @@
           "gender_text": "母",
           "spec_gram": 175,
           "spec_label": "3.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 5,
-          "unit_price": 5800,
-          "amount": 29000
+          "amount": 29000,
+          "unit_price_milli": 58000,
+          "unit_price_yuan": "58.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "母3.5两"
         }
       ],
       "items_summary": "公4.5两×5, 母3.5两×5",
@@ -198,11 +234,13 @@
           "gender_text": "公",
           "spec_gram": 275,
           "spec_label": "5.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 6,
-          "unit_price": 13800,
-          "amount": 82800
+          "amount": 82800,
+          "unit_price_milli": 138000,
+          "unit_price_yuan": "138.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "公5.5两"
         }
       ],
       "items_summary": "公5.5两×6",
@@ -250,11 +288,13 @@
           "gender_text": "公",
           "spec_gram": 175,
           "spec_label": "3.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 8,
-          "unit_price": 5800,
-          "amount": 46400
+          "amount": 46400,
+          "unit_price_milli": 58000,
+          "unit_price_yuan": "58.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "公3.5两"
         }
       ],
       "items_summary": "公3.5两×8",
@@ -302,11 +342,13 @@
           "gender_text": "母",
           "spec_gram": 225,
           "spec_label": "4.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 4,
-          "unit_price": 8800,
-          "amount": 35200
+          "amount": 35200,
+          "unit_price_milli": 88000,
+          "unit_price_yuan": "88.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "母4.5两"
         },
         {
           "id": 6,
@@ -314,11 +356,13 @@
           "gender_text": "公",
           "spec_gram": 225,
           "spec_label": "4.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 4,
-          "unit_price": 8800,
-          "amount": 35200
+          "amount": 35200,
+          "unit_price_milli": 88000,
+          "unit_price_yuan": "88.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "公4.5两"
         }
       ],
       "items_summary": "母4.5两×4, 公4.5两×4",
@@ -376,11 +420,13 @@
           "gender_text": "母",
           "spec_gram": 275,
           "spec_label": "5.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 2,
-          "unit_price": 13800,
-          "amount": 27600
+          "amount": 27600,
+          "unit_price_milli": 138000,
+          "unit_price_yuan": "138.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "母5.5两"
         },
         {
           "id": 8,
@@ -388,11 +434,13 @@
           "gender_text": "公",
           "spec_gram": 275,
           "spec_label": "5.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 2,
-          "unit_price": 13800,
-          "amount": 27600
+          "amount": 27600,
+          "unit_price_milli": 138000,
+          "unit_price_yuan": "138.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "公5.5两"
         }
       ],
       "items_summary": "母5.5两×2, 公5.5两×2",
@@ -450,11 +498,13 @@
           "gender_text": "公",
           "spec_gram": 225,
           "spec_label": "4.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 10,
-          "unit_price": 8800,
-          "amount": 88000
+          "amount": 88000,
+          "unit_price_milli": 88000,
+          "unit_price_yuan": "88.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "公4.5两"
         },
         {
           "id": 10,
@@ -462,11 +512,13 @@
           "gender_text": "母",
           "spec_gram": 225,
           "spec_label": "4.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 10,
-          "unit_price": 8800,
-          "amount": 88000
+          "amount": 88000,
+          "unit_price_milli": 88000,
+          "unit_price_yuan": "88.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "母4.5两"
         }
       ],
       "items_summary": "公4.5两×10, 母4.5两×10",
@@ -544,11 +596,13 @@
           "gender_text": "公",
           "spec_gram": 125,
           "spec_label": "2.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 6,
-          "unit_price": 3800,
-          "amount": 22800
+          "amount": 22800,
+          "unit_price_milli": 38000,
+          "unit_price_yuan": "38.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "公2.5两"
         }
       ],
       "items_summary": "公2.5两×6",
@@ -606,11 +660,13 @@
           "gender_text": "母",
           "spec_gram": 175,
           "spec_label": "3.5两",
-          "unit": "piece",
-          "unit_text": "只",
           "quantity": 3,
-          "unit_price": 5800,
-          "amount": 17400
+          "amount": 17400,
+          "unit_price_milli": 58000,
+          "unit_price_yuan": "58.00",
+          "grade": "normal",
+          "grade_text": "正常",
+          "title": "母3.5两"
         }
       ],
       "items_summary": "母3.5两×3",

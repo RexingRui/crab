@@ -7,7 +7,7 @@ import ShipSheet from '../../components/ShipSheet'
 import PaymentSheet from '../../components/PaymentSheet'
 import FreightSheet from '../../components/FreightSheet'
 import api from '../../utils/api'
-import { fenToYuan, formatDate, maskPhone, overdueDays, itemName } from '../../utils/format'
+import { fenToYuan, formatDate, maskPhone, overdueDays, itemName, milliToYuan } from '../../utils/format'
 import { getTrackUrl, whenReady } from '../../utils/session'
 import { guardDemo } from '../../hooks/useDemoMode'
 import { toast } from '../../utils/request'
@@ -230,7 +230,7 @@ export default function Detail() {
           <View className='detail__item' key={`${it.spec_label}-${i}`}>
             <Text className='detail__item-name'>{itemName(it)}</Text>
             <Text className='detail__item-qty num'>×{it.quantity}</Text>
-            <Text className='detail__item-price num'>{fenToYuan(it.unit_price)}</Text>
+            <Text className='detail__item-price num'>{milliToYuan(it.unit_price_milli)}</Text>
             <Text className='detail__item-amount num'>{fenToYuan(it.amount)}</Text>
           </View>
         ))}

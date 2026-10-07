@@ -37,6 +37,15 @@ func TestItemsSummary(t *testing.T) {
 		t.Errorf("ItemsSummary() = %q, want %q", got, want)
 	}
 
+	// 残蟹要看得出来；改版前的混装老明细不加性别前缀
+	mixed := &Order{Items: []OrderItem{
+		{Gender: GenderFemale, SpecLabel: "3两", Grade: GradeBroken, Quantity: 2},
+		{Gender: GenderMixed, SpecLabel: "8只装 母2.5两/公3.5两", Quantity: 8},
+	}}
+	if got, want := mixed.ItemsSummary(), "母3两(残)×2, 8只装 母2.5两/公3.5两×8"; got != want {
+		t.Errorf("ItemsSummary() = %q, want %q", got, want)
+	}
+
 	empty := &Order{}
 	if got := empty.ItemsSummary(); got != "" {
 		t.Errorf("空明细应返回空串，实际 %q", got)
@@ -52,5 +61,51 @@ func TestUnpaidAmount(t *testing.T) {
 	over := &Order{PayableAmount: 79000, PaidAmount: 80000}
 	if got := over.UnpaidAmount(); got != -1000 {
 		t.Errorf("超付时 UnpaidAmount() = %d, want -1000", got)
+	}
+}
+
+func TestFormatMilliYuan(t *testing.T) {
+	cases := []struct {
+		milli int64
+		want  string
+	}{
+		{0, "0.00"},
+		{23625, "23.625"},
+		{35000, "35.00"},
+		{33600, "33.60"},
+		{1, "0.001"},
+		{-23625, "-23.625"},
+	}
+	for _, c := range cases {
+		if got := FormatMilliYuan(c.milli); got != c.want {
+			t.Errorf("FormatMilliYuan(%d) = %q, want %q", c.milli, got, c.want)
+		}
+	}
+}
+
+// 按只计价、每行向上取整到元：8 只的整数倍正好落回去年的整盒价，散买的零头进位。
+func TestLineAmount(t *testing.T) {
+	cases := []struct {
+		name  string
+		qty   int
+		milli int64
+		want  int64 // 分
+	}{
+		{"8 只 2.5 两正好 189", 8, 23625, 18900},
+		{"16 只 3 两正好 2 × 269", 16, 33625, 53800},
+		{"24 只 3.5 两正好 3 × 359", 24, 44875, 107700},
+		{"8 只 4 两正好 439", 8, 54875, 43900},
+		{"5 只 2.5 两 118.125 进位到 119", 5, 23625, 11900},
+		{"5 只 3 两 168.125 进位到 169", 5, 33625, 16900},
+		{"整元不进位", 5, 35000, 17500},
+		{"1 厘也进位到 1 元", 1, 1, 100},
+		{"单价 0 就是 0", 8, 0, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := LineAmount(c.qty, c.milli); got != c.want {
+				t.Errorf("LineAmount(%d, %d) = %d, want %d", c.qty, c.milli, got, c.want)
+			}
+		})
 	}
 }
