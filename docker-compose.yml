@@ -71,6 +71,7 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./web/track:/srv/track:ro         # 买家查单页，静态文件
       - ./web/register:/srv/register:ro   # 买家自助登记页，静态文件
+      - ./web/admin:/srv/admin:ro         # 卖家订单表，静态文件（凭 token 才能读写数据）
       - caddy-data:/data            # 证书，删了要重新签，注意 ACME 频率限制
       - caddy-config:/config
     logging:
