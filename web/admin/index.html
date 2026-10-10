@@ -110,6 +110,11 @@ td .sub{display:block;color:var(--muted);font-size:12px}
 .total{display:flex;justify-content:flex-end;gap:18px;margin-top:14px;font-size:13px;color:var(--muted);flex-wrap:wrap}
 .total b{color:var(--shell-deep);font-size:18px;font-variant-numeric:tabular-nums}
 .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
+.paste{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.paste-bar{display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap}
+.paste-bar .hint{flex:1;min-width:200px}
+.paste-bar .hint.warn{color:var(--boiled)}
+input.filled,select.filled{background:var(--hl)}
 
 /* 表格行可以点开详情 */
 #rows tr[data-id]{cursor:pointer}
@@ -199,6 +204,15 @@ td .sub{display:block;color:var(--muted);font-size:12px}
 <div class="mask" id="mask">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
     <h2 id="mTitle">录入订单</h2>
+    <div class="paste">
+      <label for="fPaste">粘贴买家发来的信息（可不填）：收件人、手机、地址、要什么蟹、运费、已付多少</label>
+      <textarea id="fPaste" rows="4" spellcheck="false"
+        placeholder="例：王先生 138 0000 0000 上海市徐汇区某某路 1 号 101 室&#10;母3两 8只，公4两 8只，运费 20，已付 578"></textarea>
+      <div class="paste-bar">
+        <button class="btn" type="button" id="parse">识别并填入</button>
+        <span class="hint" id="parseMsg">只在这台设备上识别，不会发给任何人；填完请核对</span>
+      </div>
+    </div>
     <div class="grid">
       <div><label for="fName">收货人</label><input id="fName" maxlength="32"></div>
       <div><label for="fPhone">手机号</label><input id="fPhone" maxlength="11" inputmode="numeric"></div>
@@ -468,13 +482,13 @@ td .sub{display:block;color:var(--muted);font-size:12px}
     return null
   }
 
-  function addItemRow(specId) {
+  function addItemRow(specId, qty) {
     var sp = specById(specId) || specs[0]
     if (!sp) { $('formErr').textContent = '价目表是空的，先在小程序「设置」里加规格'; return }
     var tr = document.createElement('tr')
     tr.innerHTML =
       '<td><select class="s">' + specOptions(sp.id) + '</select></td>' +
-      '<td class="qc"><input class="q num" inputmode="numeric" value="' + PACK_HINT + '" aria-label="只数"></td>' +
+      '<td class="qc"><input class="q num" inputmode="numeric" value="' + (qty || PACK_HINT) + '" aria-label="只数"></td>' +
       '<td class="pc"><input class="p num" inputmode="decimal" value="' + milliText(sp.unit_price_milli) + '" aria-label="单只价"></td>' +
       '<td class="amt"></td>' +
       '<td class="del"><button type="button" class="x" aria-label="删掉这一行">×</button></td>'
@@ -522,20 +536,380 @@ td .sub{display:block;color:var(--muted);font-size:12px}
 
   function openForm() {
     if (!specs.length) { $('listErr').textContent = '还没拿到价目表：先确认连接正常，点一下「刷新」'; return }
-    ;['fName', 'fPhone', 'fAddr', 'fNick', 'fRemarkName', 'fFee', 'fDisc', 'fPaid', 'fDate', 'fRemark']
+    ;['fPaste', 'fName', 'fPhone', 'fAddr', 'fNick', 'fRemarkName', 'fFee', 'fDisc', 'fPaid', 'fDate', 'fRemark']
       .forEach(function (id) { $(id).value = '' })
     $('fMethod').value = 'wechat'
     $('itemRows').innerHTML = ''
     $('formErr').textContent = ''
+    clearFilled()
+    setParseMsg(PARSE_TIP, false)
     // 默认给第二个母蟹档放 8 只（主推那档），和买家登记页一样
     var females = specs.filter(function (s) { return s.gender === 'female' })
     addItemRow((females[1] || females[0] || specs[0]).id)
     requestId = 'admin-' + Date.now() + '-' + Math.floor(Math.random() * 1e6)
     $('mask').className = 'mask on'
-    $('fName').focus()
+    $('fPaste').focus()
   }
 
   function closeForm() { $('mask').className = 'mask' }
+
+  // ---------- 粘贴识别 ----------
+  // 买家发来的一段话 → 录入表单。全在这台设备的浏览器里算，不发给任何人。
+  // 认不准的宁可不填：填过的格子标黄，没认出的片段列在按钮旁边，保存前人核对一遍。
+
+  var PARSE_TIP = '只在这台设备上识别，不会发给任何人；填完请核对'
+  var CN_DIGIT = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 }
+  var NUM = '(\\d+|[一二两三四五六七八九十]+)'
+
+  // 「16」「十六」「两」→ 16 / 16 / 2；认不出返回 NaN
+  function cnInt(s) {
+    if (/^\d+$/.test(s)) return parseInt(s, 10)
+    var i = s.indexOf('十')
+    if (i < 0) return s.length === 1 && CN_DIGIT[s] ? CN_DIGIT[s] : NaN
+    var tens = i === 0 ? 1 : CN_DIGIT[s.slice(0, i)]
+    var ones = i === s.length - 1 ? 0 : CN_DIGIT[s.slice(i + 1)]
+    return tens && ones != null && s.length <= 3 ? tens * 10 + ones : NaN
+  }
+
+  // 全角转半角、统一换行，后面的正则只用认半角
+  function normPaste(s) {
+    return String(s || '')
+      .replace(/[！-～]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0) })
+      .replace(/[　 \t]/g, ' ')
+      .replace(/\r\n?/g, '\n')
+  }
+
+  // 手机号：允许 +86 前缀和中间的空格、横线；前后挨着数字或字母的不算（运单号里也有长串数字）
+  var PHONE_RE = /(\+?86[ -]?)?(1[3-9]\d(?:[ -]?\d){8})/g
+  function findPhones(s) {
+    var out = [], m
+    PHONE_RE.lastIndex = 0
+    while ((m = PHONE_RE.exec(s))) {
+      var end = m.index + m[0].length
+      if (/[\dA-Za-z]/.test(s.charAt(m.index - 1)) || /\d/.test(s.charAt(end))) {
+        PHONE_RE.lastIndex = m.index + 1
+        continue
+      }
+      out.push({ start: m.index, end: end, phone: m[2].replace(/[ -]/g, '') })
+    }
+    return out
+  }
+
+  // 把 s 里的若干段换成换行（段之间不重叠、按位置排好）
+  function cutSpans(s, spans) {
+    var out = '', pos = 0
+    spans.forEach(function (sp) { out += s.slice(pos, sp[0]) + '\n'; pos = sp[1] })
+    return out + s.slice(pos)
+  }
+
+  // 带标签的写法：「收件人：张三」「地址上海市…」「微信联系人是拂晓」。
+  // 同一个字开头的标签，长的写前面，免得「微信联系人」被认成「联系人」。
+  var LABELS = [
+    ['remarkName', '微信备注名|微信备注|备注名'],
+    ['nick', '微信昵称|微信名称|微信名字|微信联系人|微信名|付款人|昵称'],
+    ['name', '收件人姓名|收货人姓名|收件人|收货人|姓名|联系人|名字'],
+    ['phone', '手机号码|联系电话|电话号码|联系方式|手机号|电话|手机'],
+    ['region', '所在地区|省市区|所在地'],
+    ['addr', '收货地址|收件地址|详细地址|地址'],
+    ['remark', '备注|留言'],
+    ['nick', '微信(?= *[:=])']
+  ]
+  var LABEL_RE = new RegExp('(?:' + LABELS.map(function (l) { return l[1] }).join('|') + ')\\s*(?:[:=]|是|为)?', 'g')
+
+  function fieldOfLabel(s, at) {
+    for (var i = 0; i < LABELS.length; i++) {
+      if (new RegExp('^(?:' + LABELS[i][1] + ')').test(s.slice(at))) return LABELS[i][0]
+    }
+    return ''
+  }
+
+  function takeLabels(s) {
+    var hits = [], m, got = {}, spans = []
+    LABEL_RE.lastIndex = 0
+    while ((m = LABEL_RE.exec(s))) hits.push({ field: fieldOfLabel(s, m.index), start: m.index, valStart: m.index + m[0].length })
+    hits.forEach(function (h, i) {
+      var end = i + 1 < hits.length ? hits[i + 1].start : s.length
+      var seg = s.slice(h.valStart, end)
+      var lead = /^ *(?:\n *)?/.exec(seg)[0]  // 标签在行尾、值在下一行也认
+      var body = seg.slice(lead.length), nl = body.indexOf('\n')
+      var line = nl < 0 ? body : body.slice(0, nl)
+      var skip = /^[\s,;]*/.exec(line)[0].length
+      var val = line.slice(skip).replace(/[\s,;。、.]+$/, '')
+      var lineEnd = h.valStart + lead.length + line.length
+      // 「收件人：张三 138… 上海市…」：姓名、手机只吃到自己那一截，后面的留给别的字段
+      if (h.field === 'name') val = val.split(/[ ,;]/)[0]
+      if (h.field === 'phone') {
+        var ph = findPhones(val)
+        val = ph.length && ph[0].start < 4 ? val.slice(0, ph[0].end) : ''
+      }
+      if (h.field === 'name' || h.field === 'phone') lineEnd = h.valStart + lead.length + skip + val.length
+      if (val && !got[h.field]) got[h.field] = val
+      spans.push([h.start, lineEnd])
+    })
+    return { got: got, rest: cutSpans(s, spans) }
+  }
+
+  // 金额：运费是买家补的那部分；收款可能分几笔转，加起来
+  var MONEY_RES = [
+    ['fee', /(?:补|加|另付)?(?:运费|邮费|快递费)\s*(?:[:=]|是|为)?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块)?/g],
+    ['paid', /(?:已付款?|已转账?|已收款?|已支付|付了|转了|收了|共转|转账|付款)\s*[:=]?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块)?/g],
+    ['disc', /(?:优惠|减免|抹零|少收|便宜了?)\s*[:=]?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块)?/g]
+  ]
+
+  // 规格：「母3两8只」「3两母蟹两盒」「公蟹4.5两×8」「二两五的母」「三两半」。
+  // 两后面紧跟「五 / 半」算半两，但「三两五只」是 3 两 5 只。
+  var WEIGHT_RE = /(\d+(?:\.\d+)?|[一二三四五六七八九])\s*两(?:\s*([五半])(?![只个盒箱]))?/g
+  var QTY_UNIT = new RegExp(NUM + '\\s*(只|盒|箱|个)')
+  var QTY_BARE = /^\s*(?:的)?\s*(?:母|公)?\s*蟹?\s*(?:[x×*]\s*)?(\d{1,2})(?![\d.]|\s*[元块])/
+  var QTY_BEFORE = new RegExp(NUM + '\\s*(只|盒|箱|个)\\s*(?:的)?\\s*(?:母|公)?\\s*蟹?\\s*(?:的)?\\s*$')
+  // 只报价钱：「279 的两盒」「189一盒」，按 8 只价对到规格
+  var PACK_RE = new RegExp('(\\d{3})\\s*(?:元|块)?\\s*(?:的)?\\s*(母|公)?\\s*蟹?\\s*(?:的)?\\s*' + NUM + '?\\s*(盒|箱|只)', 'g')
+
+  function findSpec(list, gender, gram, grade) {
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i]
+      if (s.gender === gender && s.spec_gram === gram && (s.grade || 'normal') === grade) return s
+    }
+    return null
+  }
+
+  function toQty(n, unit) { return unit === '盒' || unit === '箱' ? n * PACK_HINT : n }
+
+  // 一个片段里认规格；返回去掉规格后剩下的文字
+  function takeItems(clause, list, r) {
+    var ws = [], m
+    WEIGHT_RE.lastIndex = 0
+    while ((m = WEIGHT_RE.exec(clause))) {
+      var w = /^\d/.test(m[1]) ? parseFloat(m[1]) : CN_DIGIT[m[1]]
+      ws.push({ start: m.index, end: m.index + m[0].length, w: w + (m[2] ? 0.5 : 0) })
+    }
+    if (!ws.length) return takePackItems(clause, list, r)
+
+    var style = '', spans = []  // style：公母写在克重前面还是后面，按第一项定
+    ws.forEach(function (w, k) {
+      var winStart = k ? ws[k - 1].end : 0, winEnd = k < ws.length - 1 ? ws[k + 1].start : clause.length
+      var before = clause.slice(winStart, w.start), after = clause.slice(w.end, winEnd)
+      var gb = /(母|公)(?:蟹|的)?\s*$/.exec(before), ga = /^\s*(?:的)?\s*(母|公)/.exec(after)
+      var g = style === 'after' ? (ga || gb) : (gb || ga)
+      if (!style && g) style = g === gb ? 'before' : 'after'
+      var span = [w.start, w.end]
+      if (g && g === gb) span[0] = winStart + gb.index
+      if (g && g === ga) span[1] = w.end + ga[0].length
+
+      var qty = NaN, q
+      if ((q = QTY_UNIT.exec(after))) {
+        qty = toQty(cnInt(q[1]), q[2]); span[1] = Math.max(span[1], w.end + q.index + q[0].length)
+      } else if ((q = QTY_BARE.exec(after))) {
+        qty = parseInt(q[1], 10); span[1] = Math.max(span[1], w.end + q[0].length)
+      } else if ((q = QTY_BEFORE.exec(before))) {
+        qty = toQty(cnInt(q[1]), q[2]); span[0] = Math.min(span[0], winStart + q.index)
+      }
+
+      var gender = g ? (g[1] === '公' ? 'male' : 'female') : 'female'
+      var grade = /残/.test(clause.slice(Math.max(0, span[0] - 2), span[1] + 3)) ? 'broken' : 'normal'
+      var title = (gender === 'male' ? '公' : '母') + w.w + '两' + (grade === 'broken' ? '(残)' : '')
+      if (!g) r.notes.push(title + '没写公母，按母蟹')
+      if (!(qty > 0)) { qty = PACK_HINT; r.notes.push(title + '没写只数，先按 ' + PACK_HINT + ' 只') }
+      var sp = findSpec(list, gender, Math.round(w.w * 50), grade)
+      if (sp) r.items.push({ spec: sp, qty: qty })
+      else r.notes.push('价目表里没有「' + title + '」，没填')
+      spans.push(span)
+    })
+    // 窗口相邻时 span 可能重叠，合并后再抹
+    var merged = []
+    spans.sort(function (a, b) { return a[0] - b[0] }).forEach(function (sp) {
+      var last = merged[merged.length - 1]
+      if (last && sp[0] <= last[1]) last[1] = Math.max(last[1], sp[1]); else merged.push(sp.slice())
+    })
+    return cutSpans(clause, merged)
+  }
+
+  function takePackItems(clause, list, r) {
+    return clause.replace(PACK_RE, function (all, price, g, n, unit) {
+      var fen = parseInt(price, 10) * 100, gender = g === '公' ? 'male' : 'female'
+      var sp = null
+      for (var i = 0; i < list.length && !sp; i++) {
+        var s = list[i]
+        if (s.gender === gender && (s.grade || 'normal') === 'normal' &&
+          (s.pack_hint_amount != null ? s.pack_hint_amount : lineAmount(PACK_HINT, s.unit_price_milli)) === fen) sp = s
+      }
+      var qty = n ? toQty(cnInt(n), unit) : (unit === '只' ? NaN : PACK_HINT)
+      if (!sp || !(qty > 0)) return all
+      if (!g) r.notes.push(price + ' 那档按母蟹（' + sp.title + '）')
+      r.items.push({ spec: sp, qty: qty })
+      return '\n'
+    })
+  }
+
+  var PROVINCES = /^(北京|天津|上海|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|海南|四川|贵州|云南|陕西|甘肃|青海|台湾|内蒙古|广西|西藏|宁夏|新疆|香港|澳门)/
+  var ADDR_KW = /(省|市|区|县|镇|乡|街道|大道|路|街|巷|弄|号|村|小区|苑|园|栋|幢|座|单元|室|楼|大厦|公寓|广场)/
+  var NOT_NAME = /(你好|您好|谢谢|老板|麻烦|帮我|收到|好的|可以|辛苦|今天|明天|后天|下周|周[一二三四五六日末]|发货|发出|快递|顺丰|包邮|母|公|蟹|只|盒|两|吗|吧|呢|啊|哦|嗯|了|的|要|给|寄|送|到|买|订)/
+  // 带长串数字（运单号、订单号）的不算地址，「单号」里的「号」也不算
+  function isAddr(s) {
+    if (/\d{8,}/.test(s) || /(单号|运单)/.test(s)) return false
+    return PROVINCES.test(s) || (s.length >= 6 && ADDR_KW.test(s))
+  }
+  function isName(s) {
+    return /^[一-龥·]{2,6}$|^[A-Za-z][A-Za-z .]{1,19}$/.test(s) && !isAddr(s) && !NOT_NAME.test(s) &&
+      !(s.length >= 4 && ADDR_KW.test(s))
+  }
+
+  // 发货日：只认带「发」字、又不像地址的片段（「发展大道 9 号」不算），
+  // 「3.5两」这类也不会被当成 3 月 5 日
+  var DATE_RE = /(?:(\d{4})[年.\/-])?(\d{1,2})[月.\/-](\d{1,2})(?![\d两])[日号]?|(\d{1,2})[日号]|(今天|明天|后天)/
+  var DATE_NOT = /(省|市|区|县|镇|乡|道|路|街|巷|弄|村|栋|幢|单元|室)/
+  function ymd(d) {
+    var p = function (n) { return String(n).padStart(2, '0') }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+  }
+  function takeDate(clause, today) {
+    if (clause.indexOf('发') < 0 || DATE_NOT.test(clause)) return ''
+    var m = DATE_RE.exec(clause)
+    if (!m) return ''
+    var t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate()), d
+    if (m[5]) d = new Date(t0.getTime() + { '今天': 0, '明天': 1, '后天': 2 }[m[5]] * 86400000)
+    else if (m[4]) {
+      d = new Date(t0.getFullYear(), t0.getMonth(), +m[4])
+      if (d < t0) d = new Date(t0.getFullYear(), t0.getMonth() + 1, +m[4])
+    } else {
+      var mo = +m[2], da = +m[3]
+      if (mo < 1 || mo > 12 || da < 1 || da > 31) return ''
+      d = new Date(m[1] ? +m[1] : t0.getFullYear(), mo - 1, da)
+      if (!m[1] && d < new Date(t0.getTime() - 60 * 86400000)) d.setFullYear(d.getFullYear() + 1)
+    }
+    return ymd(d)
+  }
+
+  // 抹掉规格、金额后剩下的零碎字眼，不算「没认出」
+  var NOISE = /^(?:[\s蟹的各共和加及只盒箱个元块.:()要来给我一]|支付宝|微信|现金|包邮|谢谢|哈)*$/
+
+  // 纯函数：文字 + 价目表 → 认出来的字段。不碰页面，方便单独核对。
+  function parsePaste(text, list, today) {
+    var s = normPaste(text)
+    var r = { items: [], notes: [], unknown: [], paid: 0 }
+    var lab = takeLabels(s), got = lab.got
+
+    // 手机号：标签里的优先，否则取第一个
+    var phones = findPhones(s), labeled = got.phone ? findPhones(got.phone) : []
+    r.phone = labeled.length ? labeled[0].phone : (phones.length ? phones[0].phone : '')
+    var distinct = {}
+    phones.forEach(function (p) { distinct[p.phone] = 1 })
+    if (Object.keys(distinct).length > 1) r.notes.push('有 ' + Object.keys(distinct).length + ' 个手机号，用了 ' + r.phone)
+
+    var dropPhones = function (v) { return cutSpans(v, findPhones(v).map(function (p) { return [p.start, p.end] })).replace(/\s+/g, ' ').trim() }
+    if (got.name) r.name = dropPhones(got.name).split(/[ ,;]+/)[0]
+    if (got.nick) r.nick = got.nick.split(/[,;]/)[0].trim()
+    if (got.remarkName) r.remarkName = got.remarkName.split(/[,;]/)[0].trim()
+    if (got.remark) r.remark = got.remark
+    var region = got.region ? dropPhones(got.region) : '', addr = got.addr ? dropPhones(got.addr) : ''
+    if (region && addr.indexOf(region) !== 0) addr = region + ' ' + addr
+    r.addr = (addr || region).trim()
+
+    var rest = cutSpans(lab.rest, findPhones(lab.rest).map(function (p) { return [p.start, p.end] }))
+    MONEY_RES.forEach(function (mr) {
+      rest = rest.replace(mr[1], function (all, n) {
+        var fen = parseUnits(n, 2)
+        if (mr[0] === 'paid') r.paid += fen
+        else if (r[mr[0]] == null) r[mr[0]] = fen
+        return '\n'
+      })
+    })
+    if (/支付宝/.test(s)) r.method = 'alipay'
+    else if (/现金/.test(s)) r.method = 'cash'
+
+    // 剩下的按片段归类。地址被逗号拆成几段时，挨着的几段拼回去，最后取最长的一处
+    var nameCand = '', addrParts = [], lastAddr = false
+    rest.split(/[\n,;。、!?+]+/).forEach(function (clause) {
+      takeItems(clause, list, r).split('\n').forEach(function (c) {
+        c = c.replace(/\s+/g, ' ').trim()
+        if (!c || NOISE.test(c) || /^\d{6}$/.test(c)) return
+        var d = takeDate(c, today)
+        if (d) { if (!r.date) r.date = d; lastAddr = false; return }
+        if (isAddr(c)) {
+          // 「张三 上海市…」：前面一截像人名就拆开
+          var sp = c.indexOf(' '), head = sp > 0 ? c.slice(0, sp) : ''
+          if (head && isName(head) && isAddr(c.slice(sp + 1))) {
+            if (!nameCand) nameCand = head
+            c = c.slice(sp + 1)
+          }
+          if (lastAddr) addrParts[addrParts.length - 1] += c; else addrParts.push(c)
+          lastAddr = true
+          return
+        }
+        lastAddr = false
+        if (isName(c) && !nameCand) { nameCand = c; return }
+        r.unknown.push(c)
+      })
+    })
+    if (!r.name) r.name = nameCand
+    if (!r.addr) r.addr = addrParts.reduce(function (a, b) { return b.length > a.length ? b : a }, '')
+    return r
+  }
+
+  function clearFilled() {
+    $('mask').querySelectorAll('.filled').forEach(function (el) { el.classList.remove('filled') })
+  }
+
+  function setParseMsg(text, warn) {
+    $('parseMsg').textContent = text
+    $('parseMsg').className = 'hint' + (warn ? ' warn' : '')
+  }
+
+  function applyPaste() {
+    var text = $('fPaste').value
+    if (!text.trim()) { setParseMsg('先把买家发来的信息贴进上面的框', true); return }
+    var r = parsePaste(text, specs, new Date())
+    var filled = [], notes = r.notes.slice()
+    clearFilled()
+    function put(id, v, label) {
+      if (v == null || v === '') return
+      $(id).value = v
+      $(id).classList.add('filled')
+      filled.push(label)
+    }
+
+    // 老客户：手机号对得上以前的单，没写的收件人 / 地址 / 微信沿用最近一单
+    var prev = r.phone ? orders.filter(function (o) { return o.phone === r.phone })
+      .sort(function (a, b) { return a.created_at < b.created_at ? 1 : -1 }) : []
+    if (prev.length) {
+      var p = prev[0], reused = []
+      if (!r.name && p.receiver_name) { r.name = p.receiver_name; reused.push('收件人') }
+      if (!r.addr && p.address) { r.addr = p.address; reused.push('地址') }
+      if (!r.nick && p.wechat_nick) { r.nick = p.wechat_nick; reused.push('微信昵称') }
+      if (!r.remarkName && p.wechat_remark) { r.remarkName = p.wechat_remark; reused.push('备注名') }
+      notes.push('老客户：这个手机号已有 ' + prev.length + ' 单（最近 ' + p.order_no + '）' +
+        (reused.length ? '，' + reused.join('、') + '沿用上一单' : ''))
+    }
+
+    put('fName', r.name, '收件人')
+    put('fPhone', r.phone, '手机')
+    put('fAddr', r.addr, '地址')
+    put('fNick', r.nick, '微信昵称')
+    put('fRemarkName', r.remarkName, '备注名')
+    put('fRemark', r.remark, '备注')
+    put('fDate', r.date, '发货日')
+    if (r.fee != null) put('fFee', yuan(r.fee).slice(1), '运费')
+    if (r.disc != null) put('fDisc', yuan(r.disc).slice(1), '优惠')
+    if (r.paid) put('fPaid', yuan(r.paid).slice(1), '已收款')
+    if (r.method) { $('fMethod').value = r.method; $('fMethod').classList.add('filled') }
+    if (r.items.length) {
+      $('itemRows').innerHTML = ''
+      var crabs = 0
+      r.items.forEach(function (it) { addItemRow(it.spec.id, it.qty); crabs += it.qty })
+      $('itemRows').querySelectorAll('select,input').forEach(function (el) { el.classList.add('filled') })
+      filled.push(r.items.length + ' 种蟹共 ' + crabs + ' 只')
+    }
+    recalc()
+
+    var parts = []
+    parts.push(filled.length ? '认出：' + filled.join('、') : '什么也没认出来，手动填吧')
+    if (notes.length) parts.push(notes.join('；'))
+    if (r.unknown.length) {
+      parts.push('没认出：' + r.unknown.slice(0, 5).map(function (u) { return '「' + (u.length > 20 ? u.slice(0, 20) + '…' : u) + '」' }).join(' ') +
+        (r.unknown.length > 5 ? ' 等 ' + r.unknown.length + ' 段' : ''))
+    }
+    setParseMsg(parts.join('。') + '。保存前请核对标黄的格子', notes.length > 0 || r.unknown.length > 0 || !filled.length)
+  }
 
   function submit() {
     var err = $('formErr')
@@ -928,6 +1302,10 @@ td .sub{display:block;color:var(--muted);font-size:12px}
   $('submit').addEventListener('click', submit)
   $('fFee').addEventListener('input', recalc)
   $('fDisc').addEventListener('input', recalc)
+  $('parse').addEventListener('click', applyPaste)
+  // 改过的格子就不再标黄：黄色只表示「识别填的，还没人看过」
+  $('mask').addEventListener('input', function (e) { if (e.target.classList) e.target.classList.remove('filled') })
+  $('mask').addEventListener('change', function (e) { if (e.target.classList) e.target.classList.remove('filled') })
   $('mask').addEventListener('click', function (e) { if (e.target === this) closeForm() })
   $('rows').addEventListener('click', function (e) {
     var tr = e.target.closest('tr[data-id]')
