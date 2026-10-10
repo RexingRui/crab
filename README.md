@@ -319,7 +319,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8080/api/specs          # 只�
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/specs?all=1'  # 连停用的一起返回
 
 curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
-  -d '{"gender":"female","spec_gram":150,"spec_label":"3两","unit_price_milli":33625}'
+  -d '{"gender":"female","spec_gram":150,"spec_label":"3两","unit_price_milli":34875}'
 # 残蟹：同一克重另起一档
 curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
   -d '{"gender":"female","spec_gram":150,"grade":"broken","spec_label":"3两","unit_price_milli":20000}'

@@ -573,11 +573,11 @@ func TestSpecsAndAddresses(t *testing.T) {
 	if err := json.Unmarshal(data, &specs); err != nil {
 		t.Fatalf("解析规格失败: %v", err)
 	}
-	// 种子价目表按只计价：母 2.5-4 两、公 3.5-5 两共 8 档，每档 8 只正好是去年的整盒价
+	// 种子价目表按只计价：母 2.5-4 两、公 3.5-5 两共 8 档，每档 8 只正好是一盒的整价
 	if specs.Total != 8 {
 		t.Fatalf("种子数据应有 8 档，实际 %d", specs.Total)
 	}
-	packs := map[string]bool{"189.00": true, "269.00": true, "359.00": true, "439.00": true}
+	packs := map[string]bool{"189.00": true, "279.00": true, "359.00": true, "439.00": true}
 	for _, sp := range specs.List {
 		if !packs[sp.PackHintAmountYuan] || sp.Grade != "normal" {
 			t.Fatalf("种子档不对: %+v", sp)

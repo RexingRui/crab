@@ -189,17 +189,18 @@ func (s *SQLiteStore) hasColumn(ctx context.Context, table, column string) (bool
 // seedSpecs 是首次启动时写入的当季价目表，按只计价。
 //
 // 单只价由去年的 8 只混装套餐价摊出来：一盒 4 母 4 公，母 X 两和公 X+1 两同价，
-// 189 元一盒 → 23.625 元一只。所以 8 只正好是 189、269、359、439。
+// 189 元一盒 → 23.625 元一只。所以 8 只正好是 189、279、359、439
+// （第二档原是 269，10 月起调到 279，单只 34.875 元）。
 // 残蟹还没定价，不写种子，定了价在「设置」页加上。
 //
 // 只在 specs 表为空时插入。已经跑起来的库不会被覆盖——换价目表去小程序「设置」页改。
 var seedSpecs = []model.Spec{
 	{Gender: model.GenderFemale, SpecGram: 125, SpecLabel: "2.5两", UnitPriceMilli: 23625, SortNo: 1},
-	{Gender: model.GenderFemale, SpecGram: 150, SpecLabel: "3两", UnitPriceMilli: 33625, SortNo: 2},
+	{Gender: model.GenderFemale, SpecGram: 150, SpecLabel: "3两", UnitPriceMilli: 34875, SortNo: 2},
 	{Gender: model.GenderFemale, SpecGram: 175, SpecLabel: "3.5两", UnitPriceMilli: 44875, SortNo: 3},
 	{Gender: model.GenderFemale, SpecGram: 200, SpecLabel: "4两", UnitPriceMilli: 54875, SortNo: 4},
 	{Gender: model.GenderMale, SpecGram: 175, SpecLabel: "3.5两", UnitPriceMilli: 23625, SortNo: 5},
-	{Gender: model.GenderMale, SpecGram: 200, SpecLabel: "4两", UnitPriceMilli: 33625, SortNo: 6},
+	{Gender: model.GenderMale, SpecGram: 200, SpecLabel: "4两", UnitPriceMilli: 34875, SortNo: 6},
 	{Gender: model.GenderMale, SpecGram: 225, SpecLabel: "4.5两", UnitPriceMilli: 44875, SortNo: 7},
 	{Gender: model.GenderMale, SpecGram: 250, SpecLabel: "5两", UnitPriceMilli: 54875, SortNo: 8},
 }
