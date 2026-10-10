@@ -319,7 +319,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8080/api/specs          # 只�
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/specs?all=1'  # 连停用的一起返回
 
 curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
-  -d '{"gender":"female","spec_gram":150,"spec_label":"3两","unit_price_milli":33625}'
+  -d '{"gender":"female","spec_gram":150,"spec_label":"3两","unit_price_milli":34875}'
 # 残蟹：同一克重另起一档
 curl -X POST localhost:8080/api/specs -H "Authorization: Bearer $TOKEN" \
   -d '{"gender":"female","spec_gram":150,"grade":"broken","spec_label":"3两","unit_price_milli":20000}'
@@ -535,6 +535,10 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
   顶上一行是筛选结果的单数、应收、已收、未收、只数。
 - 「+ 录入」弹窗：收货信息、付款人、几种蟹（默认一行 8 只，单只价可改）、补运费、优惠、已收款。
   金额和后端同一个公式实时算；保存用幂等键，网络抖动重试不会重复建单，也不会重复记收款。
+  弹窗顶上可以把买家发来的话整段贴进去点「识别并填入」：认带标签的写法（微信「收货人 / 手机号码 / 所在地区 /
+  详细地址」、「微信联系人是…」）和不带标签的「姓名 手机 地址」，规格认「母3两8只」「3两母蟹两盒」「279 的两盒」
+  这类写法（盒按 8 只），还有运费、已付、优惠、带「发」字的发货日。手机号对得上老单的，没写的收件人、地址、
+  微信沿用最近一单。识别只在浏览器里跑，不发给任何人；填过的格子标黄、没认出的片段列在按钮旁，保存前人核对。
 - 点表格里任意一行打开详情：明细、金额、收款流水、物流、运费一屏看完。「改信息」随时可用
   （收货人、手机、地址、微信昵称 / 备注名、期望发货日、备注；明细与金额原样带回，带 `updated_at` 防并发覆盖）。
   下面按这单当前的状态只给出后端状态机允许的操作——发货（可顺手填运费）、标记签收、记收款（退款写负数）、
