@@ -3,7 +3,7 @@
 批量录单：读 CSV 或 JSON，逐单调接口建单；JSON 还能带上收款（含收款时间）、发货（含运费）、签收，
 用来补录历史订单。
 
-    export CRAB_API=http://<服务器>          # 默认 http://127.0.0.1:8080
+    export CRAB_API=https://crab-doc.site   # 默认 http://127.0.0.1:8080
     export CRAB_TOKEN=<管理员 token>          # 只放环境变量，别写进任何文件
     python3 scripts/import-orders.py <文件.csv|文件.json> --batch 1006          # 预览，不写库
     python3 scripts/import-orders.py <文件.csv|文件.json> --batch 1006 --commit # 真正录入
