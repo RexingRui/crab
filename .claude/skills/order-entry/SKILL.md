@@ -29,8 +29,7 @@ description: 卖家发来订单截图/图片/聊天记录/快递导出/微信账
 
 ## 1. 前置检查（每个会话开始时做一次）
 
-1. 向卖家要两样：`CRAB_API`（备案前为 `http://<服务器IP>`，走 Caddy 80 端口的 IP 站点；
-   备案后为 `https://<域名>`）和管理员 token。只放在 shell 环境变量里。
+1. 向卖家要两样：`CRAB_API`（`https://crab-doc.site`，IP 直连已关）和管理员 token。只放在 shell 环境变量里。
 2. 检查 token 有效期：token 是 `base64url(payload).sig`，payload 里 `exp` 是 unix 秒。
    剩余不足 1 小时就先请卖家重签（服务器上用 `scripts/admin-api.sh` 同样的方式签）。
 3. `curl $CRAB_API/healthz` 返回 `code:0`。

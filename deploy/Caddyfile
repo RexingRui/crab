@@ -53,6 +53,15 @@
 		}
 	}
 
+	# 域名首页：只放一个名字和备案号（备案要求首页底部展示备案号）。
+	# 路径匹配是精确的，只命中 /，不会把别的路径兜进来。
+	handle / {
+		rewrite * /index.html
+		file_server {
+			root /srv/home
+		}
+	}
+
 	# 其余路径不对外暴露任何东西（/healthz 也不放出去，容器自己会自检）
 	handle {
 		respond "Not Found" 404
