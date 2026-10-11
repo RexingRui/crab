@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { View, Text, Input } from '@tarojs/components'
 import { fenToYuan, yuanToFen } from '../../utils/format'
 import { suggestBuyerFee, freightProblem } from '../../utils/freight'
+import { CURSOR_SPACING } from '../Sheet'
 import './index.scss'
 
 const BASES = [
@@ -67,6 +68,7 @@ export default function FreightFields({ order, visible, optional, onChange }) {
         <View className='freight-fields__cell'>
           <Text className='sub'>快递原价</Text>
           <Input
+            cursorSpacing={CURSOR_SPACING}
             className='freight-fields__input num'
             type='digit'
             value={list}
@@ -77,6 +79,7 @@ export default function FreightFields({ order, visible, optional, onChange }) {
         <View className='freight-fields__cell'>
           <Text className='sub'>用券后实付</Text>
           <Input
+            cursorSpacing={CURSOR_SPACING}
             className='freight-fields__input num'
             type='digit'
             value={cost}
@@ -101,6 +104,7 @@ export default function FreightFields({ order, visible, optional, onChange }) {
       <View className='freight-fields__row'>
         <Text className='sub'>买家补</Text>
         <Input
+          cursorSpacing={CURSOR_SPACING}
           className='freight-fields__input freight-fields__input--short num'
           type='digit'
           value={touched ? buyer : yuan(suggest)}

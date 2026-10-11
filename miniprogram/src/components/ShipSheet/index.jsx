@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { View, Text, Input } from '@tarojs/components'
-import Sheet from '../Sheet'
+import Sheet, { CURSOR_SPACING } from '../Sheet'
 import FreightFields from '../FreightFields'
 import './index.scss'
 
@@ -55,6 +55,7 @@ export default function ShipSheet({ visible, order, submitting, onClose, onSubmi
 
       <Text className='sub ship-sheet__gap'>运单号</Text>
       <Input
+        cursorSpacing={CURSOR_SPACING}
         className='ship-sheet__input num'
         value={trackingNo}
         placeholder='粘贴或输入运单号'

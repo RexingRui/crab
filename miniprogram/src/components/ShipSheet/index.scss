@@ -26,11 +26,8 @@
   &__gap { display: block; margin-top: 32px; }
 
   &__input {
+    @include box-input;
     margin-top: 16px;
-    border: 1px solid $line;
-    border-radius: $radius-btn;
-    padding: 20px 24px;
-    font-size: 30px;
   }
 
   &__freight { margin-top: 20px; }
