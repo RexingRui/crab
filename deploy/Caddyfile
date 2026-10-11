@@ -67,3 +67,9 @@
 		respond "Not Found" 404
 	}
 }
+
+# 备案登记的服务首页是 www.<域名>，核查会去访问它，统一跳到主域名。
+# 前提是 www 也有一条 A 记录指向本机，否则这个站点签不出证书（不影响主域名）。
+www.{$CRAB_DOMAIN} {
+	redir https://{$CRAB_DOMAIN}{uri} permanent
+}
