@@ -12,10 +12,7 @@
   &__search {
     flex: 1;
     background: $card;
-    border: 1px solid $line;
-    border-radius: $radius-btn;
-    padding: 18px 24px;
-    font-size: 28px;
+    @include box-input(80px, 28px);
   }
 
   &__filter { font-size: 28px; color: $shell; padding: 0 8px; }

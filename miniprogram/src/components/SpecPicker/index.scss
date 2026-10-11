@@ -82,11 +82,8 @@
   }
 
   &__input {
+    @include box-input(80px);
     flex: 1;
-    border: 1px solid $line;
-    border-radius: $radius-btn;
-    padding: 14px 20px;
-    font-size: 30px;
   }
 }
 

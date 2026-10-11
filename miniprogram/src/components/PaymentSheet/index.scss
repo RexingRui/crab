@@ -6,7 +6,11 @@
     font-size: 56px;
     font-weight: 600;
     border-bottom: 1px solid $line;
-    padding: 12px 0;
+    // 大字号同样会被原生 input 的默认高度截掉，高度写死
+    height: 104px;
+    min-height: 104px;
+    line-height: normal;
+    padding: 0;
   }
 
   &__gap { display: block; margin-top: 32px; }
@@ -33,10 +37,7 @@
   }
 
   &__input {
+    @include box-input($font: 28px);
     margin-top: 16px;
-    border: 1px solid $line;
-    border-radius: $radius-btn;
-    padding: 20px 24px;
-    font-size: 28px;
   }
 }

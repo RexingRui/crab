@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { View, Text, Input } from '@tarojs/components'
-import Sheet from '../Sheet'
+import Sheet, { CURSOR_SPACING } from '../Sheet'
 import { fenToYuan, milliToYuan, yuanToMilli, lineAmount, itemName, PACK_HINT } from '../../utils/format'
 import './index.scss'
 
@@ -139,6 +139,7 @@ export default function SpecPicker({ visible, specs = [], onClose, onConfirm }) 
       <View className='spec-picker__line'>
         <Text className='spec-picker__label'>单只价</Text>
         <Input
+          cursorSpacing={CURSOR_SPACING}
           className='spec-picker__input num'
           type='digit'
           value={priceInput}

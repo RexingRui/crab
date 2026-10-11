@@ -31,3 +31,15 @@ $radius-btn: 12px;
 @mixin float-shadow {
   box-shadow: 0 -8px 32px rgba(28, 35, 30, 0.16);
 }
+
+// 带边框的输入框。小程序原生 input 自带 height/min-height（约 1.4rem），全局又是 border-box，
+// 再写上下 padding 就会把文字区挤扁，字和占位符只露出上半截。所以高度写死、上下不留 padding。
+@mixin box-input($height: 88px, $font: 30px) {
+  height: $height;
+  min-height: $height;
+  line-height: normal;
+  padding: 0 24px;
+  font-size: $font;
+  border: 1px solid $line;
+  border-radius: $radius-btn;
+}

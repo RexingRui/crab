@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { View, Text, Input } from '@tarojs/components'
-import Sheet from '../Sheet'
+import Sheet, { CURSOR_SPACING } from '../Sheet'
 import { fenToYuan, yuanToFen } from '../../utils/format'
 import './index.scss'
 
@@ -46,6 +46,7 @@ export default function PaymentSheet({ visible, order, submitting, onClose, onSu
     >
       <Text className='sub'>金额（填负数就是退回去的钱；记错了也是再记一笔负数冲掉）</Text>
       <Input
+        cursorSpacing={CURSOR_SPACING}
         className='payment-sheet__amount num'
         type='digit'
         value={amount}
@@ -68,6 +69,7 @@ export default function PaymentSheet({ visible, order, submitting, onClose, onSu
 
       <Text className='sub payment-sheet__gap'>备注</Text>
       <Input
+        cursorSpacing={CURSOR_SPACING}
         className='payment-sheet__input'
         value={remark}
         placeholder='比如：定金、补运费'
