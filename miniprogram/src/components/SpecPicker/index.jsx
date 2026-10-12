@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { View, Text, Input } from '@tarojs/components'
 import Sheet, { CURSOR_SPACING } from '../Sheet'
-import { fenToYuan, milliToYuan, yuanToMilli, lineAmount, itemName, PACK_HINT } from '../../utils/format'
+import { fenToYuan, milliToYuan, yuanToMilli, lineAmount, quoteAmount, itemName, PACK_HINT } from '../../utils/format'
 import './index.scss'
 
 /**
  * 半屏规格选择器：选一种蟹（性别 + 克重 + 品相），填几只。按只计价，没有「盒」。
  *
  * 单只价默认带出价目表的价，但必须可改——熟客让价、大客户批发价是常态，
- * 不要因为有价目表就设成只读。单只价精确到厘（23.625 元），金额 = 只数 × 单只价，
- * 向上取整到元，和后端同一个公式（utils/format.lineAmount）。
+ * 不要因为有价目表就设成只读。单只价精确到厘（23.625 元），这一行金额 = 只数 × 单只价，
+ * 向上取整到分；整单货款再统一进位到元（utils/format.goodsAmount），和后端同一套公式。
  *
  * 注意：后端的订单明细是**快照**，不关联 specs 表（改价不影响历史单），
  * 所以这里要把整条规格带过去，不能只传 spec_id。
@@ -118,7 +118,7 @@ export default function SpecPicker({ visible, specs = [], onClose, onConfirm }) 
             <Text className='spec-picker__price num'>
               {fenToYuan(spec.pack_hint_amount != null
                 ? spec.pack_hint_amount
-                : lineAmount(PACK_HINT, spec.unit_price_milli))}/{PACK_HINT}只
+                : quoteAmount(PACK_HINT, spec.unit_price_milli))}/{PACK_HINT}只
             </Text>
             <Text className='spec-picker__unit num'>{milliToYuan(spec.unit_price_milli)}/只</Text>
           </View>

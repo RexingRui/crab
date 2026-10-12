@@ -83,7 +83,7 @@ func TestFormatMilliYuan(t *testing.T) {
 	}
 }
 
-// 按只计价、每行向上取整到元：8 只的整数倍正好落回去年的整盒价，散买的零头进位。
+// 明细金额只进位到分，展示用。
 func TestLineAmount(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -92,13 +92,10 @@ func TestLineAmount(t *testing.T) {
 		want  int64 // 分
 	}{
 		{"8 只 2.5 两正好 189", 8, 23625, 18900},
-		{"16 只 3 两正好 2 × 269", 16, 33625, 53800},
-		{"24 只 3.5 两正好 3 × 359", 24, 44875, 107700},
-		{"8 只 4 两正好 439", 8, 54875, 43900},
-		{"5 只 2.5 两 118.125 进位到 119", 5, 23625, 11900},
-		{"5 只 3 两 168.125 进位到 169", 5, 33625, 16900},
-		{"整元不进位", 5, 35000, 17500},
-		{"1 厘也进位到 1 元", 1, 1, 100},
+		{"6 只 34.875 = 209.25", 6, 34875, 20925},
+		{"5 只 2.5 两 118.125 进位到 118.13", 5, 23625, 11813},
+		{"整分不进位", 5, 35000, 17500},
+		{"1 厘也进位到 1 分", 1, 1, 1},
 		{"单价 0 就是 0", 8, 0, 0},
 	}
 	for _, c := range cases {
@@ -107,5 +104,36 @@ func TestLineAmount(t *testing.T) {
 				t.Errorf("LineAmount(%d, %d) = %d, want %d", c.qty, c.milli, got, c.want)
 			}
 		})
+	}
+}
+
+// 按只计价、整单向上取整到元：8 只的整数倍正好落回去年的整盒价，散买的零头进位，
+// 同价的混装凑满一盒也是整盒价，不会每行各进一次位多收钱。
+func TestGoodsAmount(t *testing.T) {
+	item := func(qty int, milli int64) OrderItem { return OrderItem{Quantity: qty, UnitPriceMilli: milli} }
+	cases := []struct {
+		name  string
+		items []OrderItem
+		want  int64 // 分
+	}{
+		{"8 只 2.5 两正好 189", []OrderItem{item(8, 23625)}, 18900},
+		{"16 只 3 两正好 2 × 269", []OrderItem{item(16, 33625)}, 53800},
+		{"24 只 3.5 两正好 3 × 359", []OrderItem{item(24, 44875)}, 107700},
+		{"5 只 2.5 两 118.125 进位到 119", []OrderItem{item(5, 23625)}, 11900},
+		{"整元不进位", []OrderItem{item(5, 35000)}, 17500},
+		{"1 厘也进位到 1 元", []OrderItem{item(1, 1)}, 100},
+		{"母 3 两 6 只 + 公 4 两 2 只同价，合起来正好 279", []OrderItem{item(6, 34875), item(2, 34875)}, 27900},
+		{"两行零头合起来只进一次位：118.125 + 23.625 = 141.75 → 142", []OrderItem{item(5, 23625), item(1, 23625)}, 14200},
+		{"没有明细就是 0", nil, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := GoodsAmount(c.items); got != c.want {
+				t.Errorf("GoodsAmount = %d, want %d", got, c.want)
+			}
+		})
+	}
+	if got := QuoteAmount(8, 34875); got != 27900 {
+		t.Errorf("QuoteAmount(8, 34875) = %d, want 27900", got)
 	}
 }

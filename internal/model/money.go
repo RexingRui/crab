@@ -41,6 +41,9 @@ func pad2(n int64) string {
 // 厘只用在单价上，明细金额、订单金额仍然一律是整数「分」。
 const MilliPerYuan = 1000
 
+// MilliPerFen 1 分 = 10 厘。
+const MilliPerFen = 10
+
 // FormatMilliYuan 把「厘」格式化为元字符串，至少两位小数，第三位是 0 就省掉：
 //
 //	23625 -> "23.625"
@@ -64,12 +67,36 @@ func FormatMilliYuan(milli int64) string {
 	return s
 }
 
-// LineAmount 一行明细的金额（分）= 只数 × 单只价，**向上取整到元**。
+// LineAmount 一行明细的金额（分）= 只数 × 单只价，向上取整到**分**。
 //
-// 8 只、16 只这种整盒的量本来就是整元（23.625 × 8 = 189），取整不改变它；
-// 散买的零头一律进位：5 只 × 23.625 = 118.125 → 119 元。全整数运算。
+// 明细金额只是展示用的近似值，不做元的进位：每行各进一次位，
+// 6 只母 3 两（209.25）+ 2 只公 4 两（69.75）会变成 210 + 70 = 280，
+// 而同价的 8 只本该是 279。要收多少看 GoodsAmount，整单只进位一次。
 func LineAmount(quantity int, unitPriceMilli int64) int64 {
 	total := int64(quantity) * unitPriceMilli
-	yuan := (total + MilliPerYuan - 1) / MilliPerYuan
+	return (total + MilliPerFen - 1) / MilliPerFen
+}
+
+// GoodsAmount 货款（分）= Σ 只数 × 单只价，整单向上取整到元。
+//
+// 进位只在整单上做一次：8 只、16 只这种整盒的量本来就是整元（23.625 × 8 = 189），
+// 混装凑满一盒也是整元；散买的零头进位：5 只 × 23.625 = 118.125 → 119 元。全整数运算。
+func GoodsAmount(items []OrderItem) int64 {
+	var total int64
+	for _, it := range items {
+		total += int64(it.Quantity) * it.UnitPriceMilli
+	}
+	return ceilYuan(total)
+}
+
+// QuoteAmount 单买一档 n 只要多少钱（分），即只有这一行的订单的货款。
+// 价目表上「8 只 ¥189」的报价用它。
+func QuoteAmount(quantity int, unitPriceMilli int64) int64 {
+	return ceilYuan(int64(quantity) * unitPriceMilli)
+}
+
+// ceilYuan 厘 → 分，向上取整到元。
+func ceilYuan(milli int64) int64 {
+	yuan := (milli + MilliPerYuan - 1) / MilliPerYuan
 	return yuan * 100
 }

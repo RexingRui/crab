@@ -328,10 +328,15 @@ input.filled,select.filled{background:var(--hl)}
     return y + '.' + (s[2] === '0' ? s.slice(0, 2) : s)
   }
 
-  // 和后端 model.LineAmount 同一个公式：只数 × 单只价，向上取整到元，返回分
+  // 和后端 model.LineAmount 同一个公式：只数 × 单只价，向上取整到分，只做展示
   function lineAmount(qty, milli) {
     var t = qty * milli
-    return t > 0 ? Math.ceil(t / 1000) * 100 : 0
+    return t > 0 ? Math.ceil(t / 10) : 0
+  }
+
+  // 和后端 model.GoodsAmount 同一个公式：厘 → 分，整单向上取整到元，只进一次位
+  function ceilYuan(milli) {
+    return milli > 0 ? Math.ceil(milli / 1000) * 100 : 0
   }
 
   function day(s) {
@@ -474,7 +479,7 @@ input.filled,select.filled{background:var(--hl)}
 
   function specOptions(selected) {
     return specs.map(function (s) {
-      var hint = s.pack_hint_amount != null ? s.pack_hint_amount : lineAmount(PACK_HINT, s.unit_price_milli)
+      var hint = s.pack_hint_amount != null ? s.pack_hint_amount : ceilYuan(PACK_HINT * s.unit_price_milli)
       return '<option value="' + s.id + '"' + (String(s.id) === String(selected) ? ' selected' : '') + '>' +
         esc(s.title) + '　' + PACK_HINT + '只' + esc(yuan(hint)) + '</option>'
     }).join('')
@@ -529,8 +534,9 @@ input.filled,select.filled{background:var(--hl)}
 
   function recalc() {
     var r = readItems()
-    var goods = 0
-    ;(r.items || []).forEach(function (it) { goods += lineAmount(it.quantity, it.unit_price_milli) })
+    var milli = 0
+    ;(r.items || []).forEach(function (it) { milli += it.quantity * it.unit_price_milli })
+    var goods = ceilYuan(milli)
     var fee = parseUnits($('fFee').value, 2) || 0, disc = parseUnits($('fDisc').value, 2) || 0
     $('tGoods').textContent = yuan(goods)
     $('tPayable').textContent = yuan(goods + fee - disc)
@@ -734,7 +740,7 @@ input.filled,select.filled{background:var(--hl)}
       for (var i = 0; i < list.length && !sp; i++) {
         var s = list[i]
         if (s.gender === gender && (s.grade || 'normal') === 'normal' &&
-          (s.pack_hint_amount != null ? s.pack_hint_amount : lineAmount(PACK_HINT, s.unit_price_milli)) === fen) sp = s
+          (s.pack_hint_amount != null ? s.pack_hint_amount : ceilYuan(PACK_HINT * s.unit_price_milli)) === fen) sp = s
       }
       var qty = n ? toQty(cnInt(n), unit) : (unit === '只' ? NaN : PACK_HINT)
       if (!sp || !(qty > 0)) return all

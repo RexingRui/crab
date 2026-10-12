@@ -182,7 +182,7 @@ func TestMigrateBoxToPiece(t *testing.T) {
 func TestSeedSpecsPackPrices(t *testing.T) {
 	want := map[int64]bool{18900: true, 27900: true, 35900: true, 43900: true}
 	for _, sp := range seedSpecs {
-		if got := model.LineAmount(8, sp.UnitPriceMilli); !want[got] {
+		if got := model.QuoteAmount(8, sp.UnitPriceMilli); !want[got] {
 			t.Errorf("%s%s 8 只 = %d 分，不是整盒价", sp.Gender.Text(), sp.SpecLabel, got)
 		}
 	}

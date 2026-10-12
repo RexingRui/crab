@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"crab-order/internal/model"
-	"crab-order/internal/service"
 	"crab-order/internal/timex"
 )
 
@@ -484,7 +483,7 @@ func ToPublicOrderDTO(o *model.Order) PublicOrderDTO {
 }
 
 func ToPublicSpecDTO(s model.Spec) PublicSpecDTO {
-	hint := service.CalcItemAmount(PackHint, s.UnitPriceMilli)
+	hint := model.QuoteAmount(PackHint, s.UnitPriceMilli)
 	return PublicSpecDTO{
 		ID:                 s.ID,
 		Gender:             string(s.Gender),
@@ -526,7 +525,7 @@ func ToRegistrationDTO(o *model.Order, idem bool) RegistrationDTO {
 }
 
 func ToSpecDTO(s model.Spec) SpecDTO {
-	hint := service.CalcItemAmount(PackHint, s.UnitPriceMilli)
+	hint := model.QuoteAmount(PackHint, s.UnitPriceMilli)
 	return SpecDTO{
 		ID:                 s.ID,
 		Gender:             string(s.Gender),

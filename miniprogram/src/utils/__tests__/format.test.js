@@ -5,6 +5,8 @@ import {
   milliToYuan,
   yuanToMilli,
   lineAmount,
+  goodsAmount,
+  quoteAmount,
   PACK_HINT
 } from '../format'
 
@@ -105,12 +107,24 @@ describe('按只计价', () => {
     expect(yuanToMilli('')).toBe(0)
   })
 
-  it('和后端同一个公式：只数 × 单只价，向上取整到元', () => {
+  it('明细只进位到分，和后端 model.LineAmount 一致', () => {
     expect(lineAmount(8, 23625)).toBe(18900)
-    expect(lineAmount(16, 33625)).toBe(53800)
-    expect(lineAmount(5, 23625)).toBe(11900)
-    expect(lineAmount(5, 35000)).toBe(17500)
+    expect(lineAmount(5, 23625)).toBe(11813)
+    expect(lineAmount(6, 34875)).toBe(20925)
     expect(lineAmount(0, 23625)).toBe(0)
+  })
+
+  it('货款整单向上取整到元，只进位一次，和后端 model.GoodsAmount 一致', () => {
+    const item = (quantity, milli) => ({ quantity, unit_price_milli: milli })
+    expect(goodsAmount([item(8, 23625)])).toBe(18900)
+    expect(goodsAmount([item(16, 33625)])).toBe(53800)
+    expect(goodsAmount([item(5, 23625)])).toBe(11900)
+    expect(goodsAmount([item(5, 35000)])).toBe(17500)
+    // 母 3 两 6 只 + 公 4 两 2 只同价：209.25 + 69.75 = 279，不是 210 + 70
+    expect(goodsAmount([item(6, 34875), item(2, 34875)])).toBe(27900)
+    expect(goodsAmount([])).toBe(0)
+    expect(quoteAmount(8, 34875)).toBe(27900)
+    expect(quoteAmount(5, 23625)).toBe(11900)
     expect(PACK_HINT).toBe(8)
   })
 })

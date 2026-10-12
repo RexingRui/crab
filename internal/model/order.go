@@ -104,7 +104,7 @@ type OrderItem struct {
 	Quantity  int
 	// UnitPriceMilli 单只价，单位「厘」（0.001 元），见 MilliPerYuan。
 	UnitPriceMilli int64
-	Amount         int64 // 分，= LineAmount(Quantity, UnitPriceMilli)
+	Amount         int64 // 分，= LineAmount(Quantity, UnitPriceMilli)，只做展示；货款见 GoodsAmount
 	SortNo         int
 }
 

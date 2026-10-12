@@ -248,7 +248,7 @@ func TestRegistrationLooseCeil(t *testing.T) {
 	}
 	var reg RegistrationDTO
 	_ = json.Unmarshal(data, &reg)
-	if reg.PayableAmount != 11900 || reg.PayableAmount != model.LineAmount(5, sp.UnitPriceMilli) {
+	if reg.PayableAmount != 11900 || reg.PayableAmount != model.QuoteAmount(5, sp.UnitPriceMilli) {
 		t.Fatalf("5 只的金额算错: %d", reg.PayableAmount)
 	}
 
@@ -258,7 +258,7 @@ func TestRegistrationLooseCeil(t *testing.T) {
 		t.Fatalf("13 只该放行: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	_ = json.Unmarshal(data, &reg)
-	if want := model.LineAmount(13, sp.UnitPriceMilli); reg.PayableAmount != want {
+	if want := model.QuoteAmount(13, sp.UnitPriceMilli); reg.PayableAmount != want {
 		t.Fatalf("13 只的金额算错: got=%d want=%d", reg.PayableAmount, want)
 	}
 	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
@@ -310,7 +310,11 @@ func TestRegistrationMinIsWholeOrder(t *testing.T) {
 	}
 	var reg RegistrationDTO
 	_ = json.Unmarshal(data, &reg)
-	want := model.LineAmount(1, specs[0].UnitPriceMilli) + model.LineAmount(4, specs[1].UnitPriceMilli)
+	// 整单只进位一次，不是两行各自进位再相加
+	want := model.GoodsAmount([]model.OrderItem{
+		{Quantity: 1, UnitPriceMilli: specs[0].UnitPriceMilli},
+		{Quantity: 4, UnitPriceMilli: specs[1].UnitPriceMilli},
+	})
 	if reg.PayableAmount != want {
 		t.Fatalf("金额算错: got=%d want=%d", reg.PayableAmount, want)
 	}
