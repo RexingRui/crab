@@ -215,11 +215,16 @@ button.go:disabled{opacity:.45}
 
   // ---------- 价目 ----------
 
-  // 一行多少钱（分）= 只数 × 单只价（厘），向上取整到元。
-  // 必须和后端 model.LineAmount 同一个公式：页面上看到的就是最后要收的。
+  // 一行多少钱（分）= 只数 × 单只价（厘），向上取整到分，只做展示。和后端 model.LineAmount 一致。
   function lineAmount(n, milli) {
     var t = n * milli
-    return t > 0 ? Math.ceil(t / 1000) * 100 : 0
+    return t > 0 ? Math.ceil(t / 10) : 0
+  }
+
+  // 厘 → 分，向上取整到元。货款是整单只进一次位：
+  // 必须和后端 model.GoodsAmount 同一个公式，页面上看到的就是最后要收的。
+  function ceilYuan(milli) {
+    return milli > 0 ? Math.ceil(milli / 1000) * 100 : 0
   }
 
   // 单只价约到角就够看了：23.625 → 约 ¥23.6。真正算钱用的是上面的精确公式。
@@ -239,7 +244,7 @@ button.go:disabled{opacity:.45}
       for (var i = 0; i < specs.length; i++) {
         var s = specs[i]
         if (s.gender !== groups[g][0]) continue
-        var hint = s.pack_hint_amount != null ? s.pack_hint_amount : lineAmount(packHint, s.unit_price_milli)
+        var hint = s.pack_hint_amount != null ? s.pack_hint_amount : ceilYuan(packHint * s.unit_price_milli)
         rows +=
           '<div class="pick">' +
             '<span class="body">' +
@@ -303,14 +308,16 @@ button.go:disabled{opacity:.45}
 
   function picks() {
     var out = { crabs: 0, amount: 0, items: [] }
+    var milli = 0
     for (var i = 0; i < specs.length; i++) {
       var s = specs[i]
       var n = qty[s.id] || 0
       if (!n) continue
       out.crabs += n
-      out.amount += lineAmount(n, s.unit_price_milli)
+      milli += n * s.unit_price_milli
       out.items.push({ spec_id: s.id, quantity: n })
     }
+    out.amount = ceilYuan(milli)
     return out
   }
 

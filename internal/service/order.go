@@ -36,18 +36,14 @@ func (s *OrderService) SetClock(f func() int64) { s.now = f }
 
 // ========== 纯计算函数（可单测，不碰数据库） ==========
 
-// CalcItemAmount 明细金额（分）= 只数 × 单只价（厘），向上取整到元。全整数运算。
+// CalcItemAmount 明细金额（分）= 只数 × 单只价（厘），向上取整到分。只做展示，不参与汇总。
 func CalcItemAmount(quantity int, unitPriceMilli int64) int64 {
 	return model.LineAmount(quantity, unitPriceMilli)
 }
 
-// CalcGoodsAmount 货款 = Σ 明细金额。
+// CalcGoodsAmount 货款 = Σ 只数 × 单只价，整单向上取整到元（不是 Σ 明细金额）。
 func CalcGoodsAmount(items []model.OrderItem) int64 {
-	var sum int64
-	for _, it := range items {
-		sum += it.Amount
-	}
-	return sum
+	return model.GoodsAmount(items)
 }
 
 // CalcPayableAmount 应收 = 货款 + 运费 - 优惠。

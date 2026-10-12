@@ -5,7 +5,7 @@ import DemoBanner from '../DemoBanner'
 import SpecPicker from '../SpecPicker'
 import api from '../../utils/api'
 import { parseAddress, looksLikeAddressText } from '../../utils/address'
-import { fenToYuan, yuanToFen, todayStr, itemName, milliToYuan, lineAmount } from '../../utils/format'
+import { fenToYuan, yuanToFen, todayStr, itemName, milliToYuan, lineAmount, goodsAmount } from '../../utils/format'
 import { openidTail, whenReady } from '../../utils/session'
 import { guardDemo } from '../../hooks/useDemoMode'
 import { toast } from '../../utils/request'
@@ -129,7 +129,7 @@ export default function OrderForm({ orderId, clipboardTick = 0 }) {
 
   // 前端只做展示计算，最终金额以后端返回为准
   const preview = useMemo(() => {
-    const crabTotal = items.reduce((sum, it) => sum + lineAmount(it.quantity, it.unit_price_milli), 0)
+    const crabTotal = goodsAmount(items)
     return crabTotal + yuanToFen(form.freight_fee) - yuanToFen(form.discount)
   }, [items, form.freight_fee, form.discount])
 

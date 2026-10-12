@@ -10,7 +10,7 @@
 
 格式见 import/README.md。只用标准库。
 
-计价和后端同一个公式：明细金额 = 只数 × 单只价，向上取整到元。单只价不写就用价目表的。
+计价和后端同一个公式：货款 = Σ 只数 × 单只价，整单向上取整到元。单只价不写就用价目表的。
 
 可以放心重跑：每单的 request_id = imp-<batch>-<ref>，同一批次重跑命中建单幂等，
 拿回已经建好的那单，再按它当前的状态只补没做完的步骤（没收过款才记收款、
@@ -79,9 +79,10 @@ def milli(v, field):
     return to_units(v, field, 3, 1000)
 
 
-def line_amount(qty, unit_milli):
-    """和后端 model.LineAmount 同一个公式：只数 × 单只价，向上取整到元，返回分。"""
-    return -(-qty * unit_milli // 1000) * 100
+def goods_amount(items):
+    """和后端 model.GoodsAmount 同一个公式：Σ 只数 × 单只价，整单向上取整到元，返回分。"""
+    total = sum(i["quantity"] * i["unit_price_milli"] for i in items)
+    return -(-total // 1000) * 100
 
 
 def rfc3339(v, field):
@@ -191,7 +192,7 @@ def build(o, specs, batch):
     if not items:
         raise RowError("items 为空")
 
-    goods = sum(line_amount(i["quantity"], i["unit_price_milli"]) for i in items)
+    goods = goods_amount(items)
     freight_fee = fen(o.get("freight_fee"), "买家补运费")
     discount = fen(o.get("discount"), "优惠")
     payable = goods + freight_fee - discount

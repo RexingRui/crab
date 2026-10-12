@@ -752,13 +752,24 @@ func TestOrderRejectsLegacyUnitPrice(t *testing.T) {
 		t.Fatalf("旧字段期望 400/40001，实际 %d/%d", status, resp.Code)
 	}
 
-	// 散买零头向上取整到元：5 只 × 23.625 = 118.125 → 119
+	// 散买零头整单向上取整到元：5 只 × 23.625 = 118.125 → 119；明细只进位到分
 	body["items"] = []map[string]any{
 		{"gender": "female", "spec_gram": 125, "spec_label": "2.5两", "quantity": 5, "unit_price_milli": 23625},
 	}
 	body["freight_fee"], body["discount"] = 0, 0
 	o := decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", body))
-	if o.GoodsAmount != 11900 || o.Items[0].AmountYuan != "119.00" || o.Items[0].UnitPriceYuan != "23.625" {
+	if o.GoodsAmount != 11900 || o.Items[0].AmountYuan != "118.13" || o.Items[0].UnitPriceYuan != "23.625" {
 		t.Fatalf("散买金额不对: goods=%d item=%+v", o.GoodsAmount, o.Items[0])
+	}
+
+	// 混装：母 3 两 6 只 + 公 4 两 2 只同价，209.25 + 69.75 = 279，不是各行进位后的 210 + 70
+	body["items"] = []map[string]any{
+		{"gender": "female", "spec_gram": 150, "spec_label": "3两", "quantity": 6, "unit_price_milli": 34875},
+		{"gender": "male", "spec_gram": 200, "spec_label": "4两", "quantity": 2, "unit_price_milli": 34875},
+	}
+	body["request_id"] = "mp-mixed-279"
+	o = decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", body))
+	if o.GoodsAmount != 27900 || o.PayableAmount != 27900 {
+		t.Fatalf("混装金额不对: goods=%d payable=%d", o.GoodsAmount, o.PayableAmount)
 	}
 }

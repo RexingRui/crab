@@ -4,7 +4,7 @@ import { View, Text, Input, Switch } from '@tarojs/components'
 import DemoBanner from '../../components/DemoBanner'
 import Sheet from '../../components/Sheet'
 import api from '../../utils/api'
-import { fenToYuan, milliToYuan, yuanToMilli, lineAmount, itemName, PACK_HINT } from '../../utils/format'
+import { fenToYuan, milliToYuan, yuanToMilli, quoteAmount, itemName, PACK_HINT } from '../../utils/format'
 import { VERSION } from '../../utils/config'
 import {
   clearToken, getBaseUrl, getTrackUrl, setBaseUrl, setTrackUrl, whenReady, isDemoMode
@@ -132,7 +132,7 @@ export default function Settings() {
             <View className='settings__spec' key={spec.id}>
               <Text className='settings__spec-name'>{itemName(spec)}</Text>
               <Text className='settings__spec-price num'>
-                {milliToYuan(spec.unit_price_milli)}/只 · {PACK_HINT}只{fenToYuan(lineAmount(PACK_HINT, spec.unit_price_milli))}
+                {milliToYuan(spec.unit_price_milli)}/只 · {PACK_HINT}只{fenToYuan(quoteAmount(PACK_HINT, spec.unit_price_milli))}
               </Text>
               {spec.enabled === false ? <Text className='sub'>停用</Text> : null}
               <Text className='settings__link' onClick={() => editSpec(spec)}>改</Text>
@@ -239,7 +239,7 @@ export default function Settings() {
                 onInput={(e) => setEditing({ ...editing, unit_price: e.detail.value })}
               />
               <Text className='sub num'>
-                {PACK_HINT}只 {fenToYuan(lineAmount(PACK_HINT, yuanToMilli(editing.unit_price)))}
+                {PACK_HINT}只 {fenToYuan(quoteAmount(PACK_HINT, yuanToMilli(editing.unit_price)))}
               </Text>
             </View>
             <View className='field'>

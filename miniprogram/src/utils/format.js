@@ -174,10 +174,25 @@ export function yuanToMilli(input) {
   return sign * (yuan * 1000 + parseInt(fracStr, 10));
 }
 
-/* 一行明细多少钱（分）= 只数 × 单只价（厘），向上取整到元。
- * 必须和后端 model.LineAmount 同一个公式：页面上看到的就是最后要收的。 */
+/* 一行明细多少钱（分）= 只数 × 单只价（厘），向上取整到分。只做展示。
+ * 和后端 model.LineAmount 同一个公式。要收多少看 goodsAmount。 */
 export function lineAmount(quantity, unitPriceMilli) {
   const total = (Number(quantity) || 0) * (Number(unitPriceMilli) || 0);
   if (total <= 0) return 0;
+  return Math.ceil(total / 10);
+}
+
+/* 货款（分）= Σ 只数 × 单只价，整单向上取整到元，只进位一次。
+ * 每行各进一次位的话，母 3 两 6 只 + 公 4 两 2 只会算成 210 + 70 = 280，同价 8 只本该 279。
+ * 必须和后端 model.GoodsAmount 同一个公式：页面上看到的就是最后要收的。 */
+export function goodsAmount(items) {
+  const total = (items || []).reduce(
+    (sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_price_milli) || 0), 0);
+  if (total <= 0) return 0;
   return Math.ceil(total / 1000) * 100;
+}
+
+/* 单买一档 n 只多少钱（分），「8 只 ¥189」的报价用。和后端 model.QuoteAmount 一致。 */
+export function quoteAmount(quantity, unitPriceMilli) {
+  return goodsAmount([{ quantity, unit_price_milli: unitPriceMilli }]);
 }
