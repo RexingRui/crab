@@ -62,6 +62,10 @@
 		}
 	}
 
+	# 同机其它项目的路由（如 /zichan），每个项目一个 *.caddy 文件，
+	# 放在宿主机 /opt/caddy-sites/，由 docker-compose.yml 挂进来；目录为空也不影响启动。
+	import /etc/caddy/sites/*.caddy
+
 	# 其余路径不对外暴露任何东西（/healthz 也不放出去，容器自己会自检）
 	handle {
 		respond "Not Found" 404

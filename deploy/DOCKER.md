@@ -235,6 +235,24 @@ echo 'CRAB_PROTOCOLS=h1 h2 h3' >> .env && docker compose --profile proxy up -d
 ./scripts/tls-check.sh
 ```
 
+#### 同机其它项目共用这个 Caddy
+
+443 和证书归这个 Caddy 容器，同一台机器上的其它项目（比如家庭资产看板 zichan 的 `/zichan`）
+不改本仓库也能挂上来：`deploy/Caddyfile` 会 `import /etc/caddy/sites/*.caddy`，
+compose 把宿主机的 `/opt/caddy-sites/` 只读挂进去。每个项目往里放一个自己的 `*.caddy`
+（内容是站点块内的指令，如 `handle_path /zichan/* { reverse_proxy zichan:8080 }`），
+它的容器加入本项目的网络 `crab-order_default`，然后热加载：
+
+```bash
+sudo mkdir -p /opt/caddy-sites                 # 首次；目录为空不影响启动
+docker compose --profile proxy up -d caddy     # 首次加挂载要重建 caddy 容器（证书在卷里，不受影响）
+docker exec crab-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker exec crab-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+`import` 是原样拼接，片段里少个 `}` 会吞掉后面的兜底 404 而 `validate` 照样通过，放之前先看一眼括号。
+`scripts/deploy.sh` 只重建 `api`，不碰 caddy，这里的改动不受日常更新影响。
+
 ### 方案 B：宿主机上已经有 Nginx / Caddy
 
 后端已经映射在 `127.0.0.1:8080`，直接反代过去即可。Nginx 大致长这样：
