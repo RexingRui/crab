@@ -381,6 +381,23 @@ curl -X POST localhost:8080/api/public/registrations \
 
 返回的是登记回执（单号、明细摘要、服务端算出来的应收），不是完整订单。
 
+**公开自助入口**：不想一条条发链接，就把 `https://<域名>/r` 这一个固定地址发朋友圈或群里。
+不带 `t=` 打开时，页面先让买家留**微信号或能加微信的手机号**，提交后后端现签一条登记链接，
+页面直接跳过去填单：
+
+```bash
+curl -X POST localhost:8080/api/public/reg-links \
+  -H 'Content-Type: application/json' -d '{"contact":"13800138000"}'
+# 返回和卖家签的一样：{token, path, expires_at}
+```
+
+- 和卖家签的是同一种 token（一条只落一单、价格查表、起订量照旧），只有三处不同：
+  签发人记成 `self`（操作流水里是「buyer via 自助入口」）、有效期固定 24 小时、
+  `wechat_remark` 写的是买家留的联系方式（「手机 138…」/「微信 abc_123」），卖家照着加人。
+- 联系方式：手机号 11 位（容忍空格、横线、+86）；微信号按微信的规则，字母开头 6–20 位字母数字下划线减号。
+- 和登记共用公开写接口的限流（`PUBLIC_WRITE_RATE_LIMIT`，默认每 IP 每分钟 5 次）。
+  这条路谁都能走，被刷单时在 `.env` 设 `SELF_REG=off` 重启 api 就关掉；卖家发的链接不受影响。
+
 几条设计上的选择：
 
 - **token 无状态**，用 `AUTH_SECRET` 签，服务端不存也撤不回，只能靠 `REG_LINK_TTL` 兜底。

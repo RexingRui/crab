@@ -34,6 +34,10 @@ type Config struct {
 	// 只能靠有效期兜底，别设太长。
 	RegLinkTTL time.Duration
 
+	// SelfRegDisabled 关掉公开的自助登记入口（/r 不带链接时让买家留联系方式自己拿链接）。
+	// 默认开着；被人刷单时设 SELF_REG=off 重启就关。零值是「开」，测试里不用管它。
+	SelfRegDisabled bool
+
 	Timezone             string
 	PublicRateLimit      int
 	PublicWriteRateLimit int
@@ -77,6 +81,7 @@ func Load(envFile string) (*Config, error) {
 		Timezone:             getEnv("TIMEZONE", "Asia/Shanghai"),
 		PublicRateLimit:      getEnvInt("PUBLIC_RATE_LIMIT", 20),
 		PublicWriteRateLimit: getEnvInt("PUBLIC_WRITE_RATE_LIMIT", 5),
+		SelfRegDisabled:      strings.EqualFold(strings.TrimSpace(getEnv("SELF_REG", "on")), "off"),
 	}
 
 	ttl, err := time.ParseDuration(getEnv("AUTH_TOKEN_TTL", "720h"))

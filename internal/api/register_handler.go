@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -11,9 +12,10 @@ import (
 	"crab-order/internal/timex"
 )
 
-// 买家自助登记这条线一共三个接口：
+// 买家自助登记这条线一共四个接口：
 //
 //	POST /api/reg-links           卖家签一条登记链接（要登录）
+//	POST /api/public/reg-links    买家留联系方式，自己拿一条登记链接（免登录，SELF_REG=off 可关）
 //	GET  /api/public/specs        买家登记页的规格与价格（免登录，只给启用中的）
 //	POST /api/public/registrations 买家提交登记（免登录，凭链接里的 token）
 
@@ -46,6 +48,67 @@ func (a *API) CreateRegLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token, claims, err := a.regSigner.Issue(OpenIDFrom(r.Context()), remark, time.Now())
+	if err != nil {
+		Fail(w, r, err)
+		return
+	}
+	OK(w, regLinkDTO{
+		Token:     token,
+		Path:      "/r?t=" + token,
+		ExpiresAt: timex.Format(claims.Exp),
+	})
+}
+
+type publicRegLinkReq struct {
+	// Contact 微信号，或能加上微信的手机号。落到订单的 wechat_remark，卖家照着加人。
+	Contact string `json:"contact"`
+}
+
+var (
+	contactPhoneRe  = regexp.MustCompile(`^1[3-9]\d{9}$`)
+	contactWechatRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{5,19}$`)
+)
+
+// normalizeContact 校验联系方式，返回落到订单备注里的那句话，如「手机 13800138000」「微信 abc_123」。
+// 手机号容忍空格、横线和 +86；微信号按微信的规则：字母开头，6–20 位字母、数字、下划线、减号。
+func normalizeContact(raw string) (string, error) {
+	s := strings.Join(strings.Fields(raw), "")
+	digits := strings.TrimPrefix(strings.ReplaceAll(s, "-", ""), "+86")
+	if contactPhoneRe.MatchString(digits) {
+		return "手机 " + digits, nil
+	}
+	if contactWechatRe.MatchString(s) {
+		return "微信 " + s, nil
+	}
+	if s == "" {
+		return "", errs.InvalidParam("留个微信号或手机号，方便加你确认")
+	}
+	return "", errs.InvalidParam("微信号或手机号看着不对：手机号 11 位，微信号字母开头 6–20 位")
+}
+
+// PublicCreateRegLink POST /api/public/reg-links
+//
+// 公开的自助入口：买家在 /r 留下微信号或手机号，换一条登记链接，页面拿到就跳过去填单。
+// 和卖家签的链接是同一种 token（一条只落一单、价格查表），区别只有三处：
+// 签发人记成 self、有效期 24 小时、备注里写的是买家留的联系方式。
+// 走公开写接口的限流（PUBLIC_WRITE_RATE_LIMIT），被刷时 SELF_REG=off 关掉。
+func (a *API) PublicCreateRegLink(w http.ResponseWriter, r *http.Request) {
+	if a.cfg.SelfRegDisabled {
+		Fail(w, r, errs.New(errs.CodeNotFound, "自助登记暂时关了，直接微信联系卖家吧"))
+		return
+	}
+	var req publicRegLinkReq
+	if err := decodeJSON(r, &req); err != nil {
+		Fail(w, r, err)
+		return
+	}
+	remark, err := normalizeContact(req.Contact)
+	if err != nil {
+		Fail(w, r, err)
+		return
+	}
+
+	token, claims, err := a.selfRegSigner.Issue(service.SelfRegIssuer, remark, time.Now())
 	if err != nil {
 		Fail(w, r, err)
 		return

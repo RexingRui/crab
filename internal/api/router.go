@@ -21,8 +21,11 @@ type API struct {
 	addresses *service.AddressService
 	signer    *auth.Signer
 	regSigner *auth.RegSigner
-	wechat    *wechat.Client
-	limiter   *RateLimiter
+	// selfRegSigner 公开入口签的登记链接：买家留了联系方式立刻就跳过去用，有效期给短一些。
+	// 和 regSigner 同一个密钥，Verify 用哪个都一样。
+	selfRegSigner *auth.RegSigner
+	wechat        *wechat.Client
+	limiter       *RateLimiter
 	// writeLimiter 单独管公开写接口（买家登记）。读一次查单和写一笔订单的代价差得远，
 	// 不该共用一个配额。
 	writeLimiter *RateLimiter
@@ -32,6 +35,7 @@ type API struct {
 const (
 	defaultPublicWriteRateLimit = 5
 	defaultRegLinkTTL           = 168 * time.Hour
+	selfRegLinkTTL              = 24 * time.Hour
 )
 
 func New(cfg *config.Config, st store.Store, signer *auth.Signer, wx *wechat.Client) *API {
@@ -44,16 +48,17 @@ func New(cfg *config.Config, st store.Store, signer *auth.Signer, wx *wechat.Cli
 		regTTL = defaultRegLinkTTL
 	}
 	return &API{
-		cfg:          cfg,
-		orders:       service.NewOrderService(st),
-		stats:        service.NewStatsService(st),
-		specs:        service.NewSpecService(st),
-		addresses:    service.NewAddressService(st),
-		signer:       signer,
-		regSigner:    auth.NewRegSigner(cfg.AuthSecret, regTTL),
-		wechat:       wx,
-		limiter:      NewRateLimiter(cfg.PublicRateLimit),
-		writeLimiter: NewRateLimiter(writeLimit),
+		cfg:           cfg,
+		orders:        service.NewOrderService(st),
+		stats:         service.NewStatsService(st),
+		specs:         service.NewSpecService(st),
+		addresses:     service.NewAddressService(st),
+		signer:        signer,
+		regSigner:     auth.NewRegSigner(cfg.AuthSecret, regTTL),
+		selfRegSigner: auth.NewRegSigner(cfg.AuthSecret, selfRegLinkTTL),
+		wechat:        wx,
+		limiter:       NewRateLimiter(cfg.PublicRateLimit),
+		writeLimiter:  NewRateLimiter(writeLimit),
 	}
 }
 
@@ -123,6 +128,8 @@ func (a *API) Handler() http.Handler {
 	// 买家免登录登记（凭链接里的 token）
 	mux.HandleFunc("GET /api/public/specs", a.PublicSpecs)
 	mux.HandleFunc("POST /api/public/registrations", a.PublicRegister)
+	// 公开的自助入口：买家留个联系方式，自己拿一条登记链接
+	mux.HandleFunc("POST /api/public/reg-links", a.PublicCreateRegLink)
 
 	// 兜底：未命中的路径也返回统一 JSON，而不是标准库的纯文本 404。
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

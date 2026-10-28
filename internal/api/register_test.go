@@ -496,3 +496,47 @@ func TestDashboardCountsCrabs(t *testing.T) {
 		t.Fatalf("同一档该合成一行: %+v", d.Range.BySpec)
 	}
 }
+
+// TestSelfRegLink 公开自助入口：留联系方式换一条登记链接，落单后联系方式在微信备注里。
+func TestSelfRegLink(t *testing.T) {
+	e := newTestEnv(t)
+	selfLink := func(contact string) (Response, regLinkDTO) {
+		_, resp, data := e.callWithToken(t, http.MethodPost, "/api/public/reg-links", map[string]any{"contact": contact}, "")
+		var dto regLinkDTO
+		_ = json.Unmarshal(data, &dto)
+		return resp, dto
+	}
+
+	for _, bad := range []string{"", "12345", "1380013800", "abc", "1abcdefg", "中文微信号abc"} {
+		if resp, _ := selfLink(bad); resp.Code != errs.CodeInvalidParam {
+			t.Errorf("%q 应拒绝，实际 code=%d", bad, resp.Code)
+		}
+	}
+
+	resp, dto := selfLink(" +86 138-0013-8000 ")
+	if resp.Code != errs.CodeOK || dto.Token == "" || !strings.HasPrefix(dto.Path, "/r?t=") {
+		t.Fatalf("手机号应放行: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	sp := e.publicSpecIDs(t)[0]
+	_, resp, data := e.register(t, registerBody(dto.Token, sp.ID, 8, "13900139101"))
+	if resp.Code != errs.CodeOK {
+		t.Fatalf("自助链接应能登记: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	var reg RegistrationDTO
+	_ = json.Unmarshal(data, &reg)
+	o := decodeOrder(t, e.mustOK(t, http.MethodGet, "/api/orders/by-no/"+reg.OrderNo, nil))
+	if o.WechatRemark != "手机 13800138000" || o.Source != "web" {
+		t.Fatalf("联系方式该落进微信备注: remark=%q source=%q", o.WechatRemark, o.Source)
+	}
+
+	if resp, _ := selfLink("crab_fan-01"); resp.Code != errs.CodeOK {
+		t.Fatalf("微信号应放行: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	// 关掉入口：自助链接签不出来，卖家签的照常
+	e.api.cfg.SelfRegDisabled = true
+	if resp, _ := selfLink("13800138000"); resp.Code != errs.CodeNotFound {
+		t.Fatalf("SELF_REG=off 时应关闭，实际 code=%d", resp.Code)
+	}
+	e.regLink(t, "")
+}
