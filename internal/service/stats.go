@@ -47,6 +47,10 @@ type RangeStat struct {
 	PaidTotalYuan    string           `json:"paid_total_yuan"`
 	CrabCount        int              `json:"crab_count"`
 	BySpec           []model.SpecStat `json:"by_spec"`
+	// ReceivedTotal 区间内实际收到的钱，按收款时间算（含退款负数），和订单哪天建的无关。
+	ReceivedTotal     int64  `json:"received_total"`
+	ReceivedTotalYuan string `json:"received_total_yuan"`
+	CancelledCount    int    `json:"cancelled_count"`
 }
 
 // FreightStat 运费汇总，只出现在卖家的看板里。卖家承担 = 实付 - 买家承担。
@@ -82,7 +86,8 @@ type Dashboard struct {
 //
 // 口径说明：
 //   - today.revenue：当天实际收到的钱（按 payments.paid_at 计，含退款负数）
-//   - range.*：按订单创建时间落在区间内统计
+//   - range.*：按订单创建时间落在区间内统计，不含已取消的单（cancelled_count 单独给）
+//   - range.received_total：区间内实际收到的钱，按收款时间计，口径同 today.revenue
 func (s *StatsService) Dashboard(ctx context.Context, start, end string) (*Dashboard, error) {
 	today := timex.DateStr(s.now())
 	if start == "" {
@@ -148,6 +153,10 @@ func (s *StatsService) Dashboard(ctx context.Context, start, end string) (*Dashb
 	if err != nil {
 		return nil, errs.Internal(err)
 	}
+	received, err := s.st.SumPaymentsBetween(ctx, rangeStart, rangeEnd)
+	if err != nil {
+		return nil, errs.Internal(err)
+	}
 	d.Range = RangeStat{
 		Start:            start,
 		End:              end,
@@ -158,6 +167,10 @@ func (s *StatsService) Dashboard(ctx context.Context, start, end string) (*Dashb
 		PaidTotalYuan:    model.FormatYuan(rs.PaidTotal),
 		CrabCount:        rs.CrabCount,
 		BySpec:           bySpec,
+
+		ReceivedTotal:     received,
+		ReceivedTotalYuan: model.FormatYuan(received),
+		CancelledCount:    rs.CancelledCount,
 	}
 
 	fs, err := s.st.FreightSummary(ctx, rangeStart, rangeEnd)

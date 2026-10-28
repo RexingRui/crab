@@ -1,0 +1,56 @@
+@use '../../styles-tokens.scss' as *;
+
+.stats {
+  &__periods {
+    display: flex;
+    gap: 16px;
+    padding: 32px 24px 0;
+  }
+
+  &__period {
+    padding: 12px 24px;
+    border: 1px solid $line;
+    border-radius: $radius-tag;
+    font-size: 26px;
+    background: $card;
+
+    &--on {
+      border-color: $shell;
+      background: rgba(47, 71, 57, 0.06);
+      color: $shell;
+      font-weight: 600;
+    }
+  }
+
+  &__line {
+    display: flex;
+    align-items: center;
+    padding: 28px 24px;
+    gap: 16px;
+
+    &-label { flex: 1; font-size: 28px; }
+    &-hint { display: block; margin-top: 4px; }
+    &-value {
+      font-size: 30px;
+      text-align: right;
+
+      &--strong { font-weight: 600; font-size: 34px; }
+      // 要动手的钱给金爪色，和首页一致
+      &--claw { color: $claw; font-weight: 600; }
+    }
+    &-arrow { color: $muted; font-size: 30px; }
+  }
+
+  &__spec {
+    display: flex;
+    align-items: center;
+    padding: 24px;
+    gap: 16px;
+
+    &-name { flex: 1; font-size: 28px; }
+    &-qty { width: 140px; text-align: right; font-size: 28px; }
+    &-amount { width: 200px; text-align: right; font-size: 28px; }
+  }
+
+  &__foot { display: block; padding: 8px 24px 24px; }
+}

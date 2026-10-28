@@ -3,6 +3,7 @@ export default defineAppConfig({
     'pages/home/index',
     'pages/record/index',
     'pages/orders/index',
+    'pages/stats/index',
     'pages/detail/index',
     'pages/edit/index',
     'pages/settings/index'
@@ -22,7 +23,8 @@ export default defineAppConfig({
     list: [
       { pagePath: 'pages/home/index', text: '今天' },
       { pagePath: 'pages/record/index', text: '记一笔' },
-      { pagePath: 'pages/orders/index', text: '全部' }
+      { pagePath: 'pages/orders/index', text: '全部' },
+      { pagePath: 'pages/stats/index', text: '统计' }
     ]
   },
   style: 'v2',

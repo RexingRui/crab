@@ -559,6 +559,43 @@ func TestStatsDashboard(t *testing.T) {
 	if plan.Date != "2026-09-16" || plan.Total != 1 {
 		t.Errorf("发货计划不对: %+v", plan)
 	}
+
+	// 取消的单不算进区间的单数、应收、只数；收到的钱按收款时间算，退款照扣
+	body := sampleOrderBody()
+	body["request_id"] = "mp-stats-cancelled"
+	c := decodeOrder(t, e.mustOK(t, http.MethodPost, "/api/orders", body))
+	e.mustOK(t, http.MethodPost, "/api/orders/"+itoa(c.ID)+"/payments", map[string]any{"amount": 10000})
+	e.mustOK(t, http.MethodPost, "/api/orders/"+itoa(c.ID)+"/payments", map[string]any{"amount": -10000})
+	e.mustOK(t, http.MethodPost, "/api/orders/"+itoa(c.ID)+"/cancel", map[string]any{"reason": "不要了"})
+
+	var r struct {
+		Range struct {
+			OrderCount     int   `json:"order_count"`
+			PayableTotal   int64 `json:"payable_total"`
+			CrabCount      int   `json:"crab_count"`
+			ReceivedTotal  int64 `json:"received_total"`
+			CancelledCount int   `json:"cancelled_count"`
+			BySpec         []struct {
+				Quantity int `json:"quantity"`
+			} `json:"by_spec"`
+		} `json:"range"`
+	}
+	if err := json.Unmarshal(e.mustOK(t, http.MethodGet, "/api/stats/dashboard", nil), &r); err != nil {
+		t.Fatalf("解析看板失败: %v", err)
+	}
+	if r.Range.OrderCount != 1 || r.Range.PayableTotal != 79000 || r.Range.CrabCount != 10 || r.Range.CancelledCount != 1 {
+		t.Errorf("取消的单不该算进区间统计: %+v", r.Range)
+	}
+	if r.Range.ReceivedTotal != 40000 {
+		t.Errorf("区间实收应为 40000（退款冲掉 100），实际 %d", r.Range.ReceivedTotal)
+	}
+	crabs := 0
+	for _, s := range r.Range.BySpec {
+		crabs += s.Quantity
+	}
+	if crabs != 10 {
+		t.Errorf("按规格聚合不该含取消的单: %d 只", crabs)
+	}
 }
 
 // TestSpecsAndAddresses 规格价目表与地址簿。
