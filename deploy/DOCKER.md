@@ -280,6 +280,11 @@ server {
         add_header X-Robots-Tag noindex;
         alias /opt/crab-order/web/register/index.html;
     }
+
+    location /points {
+        add_header X-Robots-Tag noindex;
+        alias /opt/crab-order/web/points/index.html;
+    }
 }
 ```
 
@@ -329,6 +334,16 @@ ssh <服务器> 'cd /opt/crab-order && ./scripts/deploy.sh'
 | 在容器里打 `/healthz`，最多等 60s | 打印新版本日志，回滚代码 + 回滚镜像并重启 |
 
 可用的环境变量：`BRANCH`（默认 `main`）、`HEALTH_TIMEOUT`（默认 60 秒）、`SKIP_BACKUP=1`。
+
+**改了 Caddy 这边**（`deploy/Caddyfile`，或 compose 里 caddy 的挂载，比如新增 `/points` 页面）：
+`deploy.sh` 只重建 `api`、不碰 caddy，拉完代码后要再重建一次 caddy（证书在卷里，不受影响）：
+
+```bash
+docker compose --profile proxy up -d caddy
+docker exec crab-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+只改了 `web/` 下的页面内容不用动 caddy：目录是整个挂进去的，`git pull` 之后刷新就是新版。
 
 **只改了 `.env`**（比如填 `ADMIN_OPENIDS`）不用走 deploy，代码没变：
 

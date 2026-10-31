@@ -53,6 +53,15 @@
 		}
 	}
 
+	# 班级积分管理：单个静态 HTML，不调接口，数据只存在老师自己浏览器的 localStorage 里。
+	handle /points* {
+		header X-Robots-Tag noindex
+		rewrite * /index.html
+		file_server {
+			root /srv/points
+		}
+	}
+
 	# 域名首页：只放一个名字和备案号（备案要求首页底部展示备案号）。
 	# 路径匹配是精确的，只命中 /，不会把别的路径兜进来。
 	handle / {
