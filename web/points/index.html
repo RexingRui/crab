@@ -135,8 +135,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--board2);
 .ph-names{font-size:13px;color:var(--ink2);margin-top:2px}
 .panel-body{overflow:auto;padding:4px 16px 16px}
 .cat{font-size:12.5px;color:var(--muted);margin:12px 0 6px}
-.items{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.item{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);text-align:left;font-size:13px;min-height:36px;line-height:1.3}
+.items{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-auto-flow:row dense;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:6px;min-width:0;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);text-align:left;font-size:13px;min-height:36px;line-height:1.3}
+.item span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item.wide{grid-column:1/-1}
 .item b{font-family:var(--num);font-size:15px;flex:none}
 .item.plus b{color:var(--plus)}
 .item.minus b{color:var(--minus)}
@@ -317,13 +319,18 @@ textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 1
 .d-empty{height:100%;display:grid;place-items:center;font-family:var(--kai);font-size:4vh;color:rgba(237,239,230,.6)}
 .d-foot{display:flex;align-items:center;gap:1vw;overflow:hidden;white-space:nowrap;font-size:min(2.3vh,1.6vw);border-top:2px solid rgba(237,239,230,.2);padding-top:1.4vh;min-height:5.2vh}
 .d-foot .lbl{font-family:var(--kai);color:var(--chalk-y);font-size:1.2em;flex:none;margin-right:.4vw}
-.d-pill{flex:none;border:1px solid rgba(237,239,230,.26);border-radius:999px;padding:.3em .9em;color:rgba(237,239,230,.88)}
+.d-feed{flex:1;min-width:0;overflow:hidden}
+.d-feed.run{-webkit-mask-image:linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent);mask-image:linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)}
+.d-track{display:flex;width:max-content}
+.d-feed.run .d-track{animation:feed var(--dur,60s) linear infinite}
+@keyframes feed{to{transform:translateX(-50%)}}
+.d-pill{flex:none;margin-right:1vw;border:1px solid rgba(237,239,230,.26);border-radius:999px;padding:.3em .9em;color:rgba(237,239,230,.88)}
 .d-pill b{color:var(--chalk-g);font-family:var(--num);margin-left:.4em}
 .d-foot .quiet{color:rgba(237,239,230,.5)}
 .d-shop{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(21vw,360px),1fr));gap:2.2vh 1.6vw;align-content:start;height:100%;overflow:hidden}
 .d-item{border:2px solid rgba(237,239,230,.28);border-radius:20px 14px 22px 12px/14px 20px 12px 22px;padding:2vh 1.4vw;display:grid;gap:.8vh}
 .d-item-kind{font-size:min(2vh,1.4vw);color:var(--chalk-p)}
-.d-item-name{font-family:var(--kai);font-size:min(4.4vh,2.6vw);line-height:1.2}
+.d-item-name{font-family:var(--kai);font-size:min(4.4vh,2.6vw);line-height:1.2;white-space:nowrap;overflow:hidden}
 .d-item-cost{font-size:min(2.2vh,1.5vw);color:rgba(237,239,230,.7)}
 .d-item-cost b{font-family:var(--num);font-size:min(6vh,3.6vw);color:var(--chalk-y);line-height:1;margin-right:.2em}
 .d-item-meta{font-size:min(2.1vh,1.4vw);color:rgba(237,239,230,.65)}
@@ -606,6 +613,8 @@ function renderPanel(){
     }).join(''):'<p class="help" style="margin-top:12px">还没有积分项目，去「设置」里添加。</p>')+
     '<div class="cat">临时加减分</div><div class="custom"><input id="cd" type="number" step="1" placeholder="3 或 -2"'+dis+'><input id="cl" placeholder="原因"'+dis+'><button class="btn primary sm" data-a="applyCustom"'+dis+'>记录</button></div>'+
     '<button class="link" data-a="go" data-v="settings">编辑积分项目</button></div>';
+  // 名字半格放不下的项目占满一整行，不折成两行；整行也放不下就省略号，悬停看全名
+  p.querySelectorAll('.item>span').forEach(function(s){if(s.scrollWidth>s.clientWidth){s.parentNode.classList.add('wide');s.parentNode.title=s.textContent}});
   if($('#cd'))$('#cd').value=keepD;
   if($('#cl'))$('#cl').value=keepL;
 }
@@ -1117,6 +1126,30 @@ function renderDisplay(){
     '<main class="d-main">'+(v==='shop'?dShop():dBoard(v==='week'?'week':'earned'))+'</main>'+
     '<footer class="d-foot">'+dFeed()+'</footer>'+
     '<div class="d-ctrl"><button data-a="dFull">全屏</button><button data-a="dExit">退出大屏</button></div></div>';
+  fitNames();fitFeed();
+}
+/* 奖励名一行放不下：先缩字号挤进一行（最多缩到七成，行高不变，卡片不跳），再不行就折行 */
+function fitNames(){
+  document.querySelectorAll('.d-item-name').forEach(function(el){
+    var r=el.clientWidth/el.scrollWidth;if(r>=1)return;
+    var fs=parseFloat(getComputedStyle(el).fontSize);
+    if(r>=0.7){el.style.fontSize=(fs*r*0.98).toFixed(1)+'px';el.style.lineHeight=(fs*1.2).toFixed(1)+'px'}
+    else{el.style.whiteSpace='normal';el.style.fontSize=(fs*0.8).toFixed(1)+'px'}
+  });
+}
+/* 底栏「最近加分」放不下时做成走马灯：复制一份接在后面，滚到一半正好无缝衔接。
+   系统设了「减少动态效果」就不滚，只留放得下的几条。 */
+function fitFeed(){
+  var box=$('.d-feed'),tr=box&&box.firstChild;
+  if(!tr||tr.scrollWidth<=box.clientWidth)return;
+  if(window.matchMedia&&matchMedia('(prefers-reduced-motion:reduce)').matches){
+    while(tr.children.length>1&&tr.scrollWidth>box.clientWidth)tr.lastChild.remove();
+    return;
+  }
+  var w=tr.scrollWidth;
+  tr.innerHTML+=tr.innerHTML;
+  tr.style.setProperty('--dur',(w/box.clientWidth*40).toFixed(1)+'s');
+  box.classList.add('run');
 }
 function dBoard(key){
   if(!D.students.length)return '<div class="d-empty chalk">还没有学生，先在管理页面导入名单</div>';
@@ -1157,7 +1190,7 @@ function dShop(){
 function dFeed(){
   var list=D.logs.filter(function(l){return !l.rv&&l.kind!=='r'&&l.d>0}).sort(function(a,b){return b.ts-a.ts}).slice(0,10);
   if(!list.length)return '<span class="lbl">最近加分</span><span class="quiet">还没有加分记录，第一位会是谁？</span>';
-  return '<span class="lbl">最近加分</span>'+list.map(function(l){return '<span class="d-pill">'+esc(whoText(l.sids,1))+'　'+esc(l.label)+'<b>+'+l.d+'</b></span>'}).join('');
+  return '<span class="lbl">最近加分</span><div class="d-feed"><div class="d-track">'+list.map(function(l){return '<span class="d-pill">'+esc(whoText(l.sids,1))+'　'+esc(l.label)+'<b>+'+l.d+'</b></span>'}).join('')+'</div></div>';
 }
 var ctrlT=null,clockT=null;
 function openDisplay(full){
@@ -1442,6 +1475,12 @@ document.addEventListener('keydown',function(e){
 });
 document.getElementById('display').addEventListener('mousemove',showCtrl);
 document.getElementById('display').addEventListener('click',showCtrl);
+// 拖到投影屏、进出全屏都会变尺寸：上面那几处「放不放得下」要重新量
+var rzT=null;
+window.addEventListener('resize',function(){
+  clearTimeout(rzT);
+  rzT=setTimeout(function(){if(ui.display)renderDisplay();else if(ui.tab==='score')renderPanel()},150);
+});
 
 /* 多个窗口之间同步（比如大屏开在第二块屏幕上） */
 window.addEventListener('storage',function(e){
