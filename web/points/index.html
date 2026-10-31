@@ -411,7 +411,30 @@ function fresh(){
 /* ---------- 存储 ---------- */
 var LS=null;
 try{LS=window.localStorage;LS.setItem('__t','1');LS.removeItem('__t')}catch(e){LS=null}
-function normalize(d){var f=fresh();for(var k in f){if(d[k]===undefined)d[k]=f[k]}return d}
+/* 备份文件可能被人改过。读进来时把每个字段收成该有的类型、id 只许字母数字，
+   渲染时数字和 id 才能直接拼进 HTML（页面和 /admin 同源，脚本注入能读到它的 token）。 */
+var ID_RE=/^[\w-]{1,64}$/,DATE_RE=/^\d{4}-\d{2}-\d{2}$/;
+function toStr(v){return v==null?'':String(v)}
+function toInt(v){v=Math.round(Number(v));return isFinite(v)?v:0}
+function isId(v){return typeof v==='string'&&ID_RE.test(v)}
+function recs(a){return Array.isArray(a)?a.filter(function(o){return o&&typeof o==='object'&&isId(o.id)}):[]}
+function normalize(d){
+  var f=fresh();
+  var o={v:1,className:toStr(d.className)||f.className,pin:toStr(d.pin),lastBackup:toInt(d.lastBackup),sample:!!d.sample,
+    students:recs(d.students).map(function(s){return {id:s.id,no:toStr(s.no),name:toStr(s.name),gender:s.gender==='男'||s.gender==='女'?s.gender:'',note:toStr(s.note)}}),
+    items:Array.isArray(d.items)?recs(d.items).map(function(it){return {id:it.id,cat:toStr(it.cat),name:toStr(it.name),d:toInt(it.d)}}):f.items,
+    rewards:Array.isArray(d.rewards)?recs(d.rewards).map(function(r){return {id:r.id,name:toStr(r.name),cost:Math.max(1,toInt(r.cost)),kind:r.kind==='实物'?'实物':'虚拟',stock:r.stock==null||r.stock===''?null:Math.max(0,toInt(r.stock)),desc:toStr(r.desc)}}):f.rewards,
+    logs:recs(d.logs).map(function(l){
+      var x={id:l.id,ts:toInt(l.ts),sids:Array.isArray(l.sids)?l.sids.filter(isId):[],d:toInt(l.d),label:toStr(l.label),cat:toStr(l.cat),note:toStr(l.note),kind:l.kind==='r'?'r':'s'};
+      if(x.kind==='r'){x.rid=isId(l.rid)?l.rid:'';x.dlv=!!l.dlv}
+      if(l.rv)x.rv=toInt(l.rv)||1;
+      return x;
+    }).filter(function(l){return l.sids.length}),
+    att:recs(d.att).filter(function(a){return isId(a.sid)&&DATE_RE.test(a.date)}).map(function(a){return {id:a.id,sid:a.sid,date:a.date,type:toStr(a.type),note:toStr(a.note),ts:toInt(a.ts)}}),
+    attTypes:Array.isArray(d.attTypes)?d.attTypes.map(toStr).filter(Boolean):f.attTypes};
+  if(d.sampleName)o.sampleName=true;
+  return o;
+}
 function load(){
   if(LS){try{var s=LS.getItem(KEY);if(s)return normalize(JSON.parse(s))}catch(e){console.error(e)}}
   return fresh();
@@ -468,9 +491,10 @@ function match(s,q){
   return String(s.no).toLowerCase().indexOf(q)>=0||s.name.toLowerCase().indexOf(q)>=0||(/^[a-z]+$/.test(q)&&initials(s.name).indexOf(q)>=0);
 }
 function pick(q){
-  var list=students().filter(function(s){return match(s,q)});
+  var qq=String(q||'').trim();
+  if(!qq)return null;
+  var list=students().filter(function(s){return match(s,qq)});
   if(!list.length)return null;
-  var qq=String(q).trim();
   var ex=list.filter(function(s){var n=String(s.no);return n===qq||(/^\d+$/.test(qq)&&/^\d+$/.test(n)&&Number(n)===Number(qq))||s.name===qq})[0];
   return ex||list[0];
 }
@@ -502,7 +526,7 @@ function renderTop(){
 
 function banners(){
   var h='';
-  if(!LS)h+='<div class="banner err"><span>这个浏览器不允许保存数据，关掉页面后记录会丢失。请用 Chrome、Edge 或 360 浏览器（极速模式）打开这个文件。</span></div>';
+  if(!LS)h+='<div class="banner err"><span>这个浏览器不允许保存数据（无痕 / 隐私窗口常见），关掉页面后记录会丢失。请用 Chrome、Edge 或 360 浏览器（极速模式）的普通窗口打开。</span></div>';
   if(D.sample)h+='<div class="banner"><span>现在是示例数据，可以随便点点看效果。准备好了就清空，换成你班上的学生。</span><button class="btn sm" data-a="clearSample">清空示例，开始使用</button></div>';
   else if(D.logs.length){
     var last=D.lastBackup||0,newest=0,oldest=Infinity;
@@ -1140,8 +1164,15 @@ function openDisplay(full){
   ui.display=true;ui.dflash=null;
   var el=$('#display');el.hidden=false;document.body.classList.add('in-display');$('#toast-root').innerHTML='';
   renderDisplay();showCtrl();
+  // 地址带上 #display：学生按 F5 刷新还停在大屏，退出照样要密码
+  if(location.hash!=='#display'){try{history.replaceState(null,'',location.href.split('#')[0]+'#display')}catch(e){}}
   if(full)goFull();
-  clearInterval(clockT);clockT=setInterval(function(){var c=$('#dclock');if(c)c.textContent=clockStr()},15000);
+  var day=dayStr();
+  clearInterval(clockT);clockT=setInterval(function(){
+    // 大屏常开过夜：跨天重画一次，周一早上「本周」榜才会清零
+    if(dayStr()!==day){day=dayStr();renderDisplay();return}
+    var c=$('#dclock');if(c)c.textContent=clockStr();
+  },15000);
 }
 function goFull(){
   try{var de=document.documentElement;if(!document.fullscreenElement&&de.requestFullscreen)de.requestFullscreen().catch(function(){})}catch(e){}
@@ -1212,7 +1243,13 @@ var A={
   sort:function(t){ui.sort=t.dataset.v;render()},
   selAll:function(){students().filter(function(x){return match(x,ui.q)}).forEach(function(x){ui.sel.add(x.id)});renderScoreParts()},
   selNone:function(){ui.sel.clear();renderScoreParts()},
-  toggle:function(t){var id=t.dataset.id;if(ui.sel.has(id))ui.sel.delete(id);else ui.sel.add(id);renderScoreParts()},
+  toggle:function(t){
+    var id=t.dataset.id,on=!ui.sel.has(id);
+    if(on)ui.sel.add(id);else ui.sel.delete(id);
+    // 只改这一张卡片：整格重画会换掉鼠标下的元素，双击就打不开详情了
+    t.classList.toggle('sel',on);t.setAttribute('aria-pressed',on);
+    renderPanel();var b=$('#selNone');if(b)b.disabled=!ui.sel.size;
+  },
   apply:function(t){
     var it=D.items.filter(function(i){return i.id===t.dataset.id})[0];
     if(it&&ui.sel.size)applyScore(Array.from(ui.sel),it.d,it.name,it.cat);
@@ -1363,8 +1400,9 @@ document.addEventListener('change',function(e){
       try{obj=JSON.parse(rd.result)}catch(err){}
       t.value='';
       if(!obj||!Array.isArray(obj.students)||!Array.isArray(obj.logs)){notice('恢复失败','这个文件不是本系统导出的备份，或者文件已经损坏。');return}
-      ask('从备份恢复','备份里有 '+obj.students.length+' 名学生、'+obj.logs.length+' 条积分记录。恢复后会替换现在页面里的所有数据，确定吗？','恢复',true).then(function(ok){
-        if(!ok)return;D=normalize(obj);ui.sel.clear();ui.attSel.clear();commit();render();toast('已从备份恢复');
+      var nd=normalize(obj);
+      ask('从备份恢复','备份里有 '+nd.students.length+' 名学生、'+nd.logs.length+' 条积分记录。恢复后会替换现在页面里的所有数据，确定吗？','恢复',true).then(function(ok){
+        if(!ok)return;D=nd;ui.sel.clear();ui.attSel.clear();commit();render();toast('已从备份恢复');
       });
     };
     rd.readAsText(file,'utf-8');
@@ -1389,7 +1427,7 @@ document.addEventListener('keydown',function(e){
     if(e.target.id==='q'){
       var p=pick(ui.q);
       if(p){ui.sel.add(p.id);ui.q='';e.target.value='';renderScoreParts()}
-      else toast('没有找到「'+ui.q+'」');
+      else if(ui.q.trim())toast('没有找到「'+ui.q+'」');
     }else if(e.target.id==='attQ'){
       var p2=pick(ui.attQ);
       if(p2){ui.attSel.add(p2.id);ui.attQ='';e.target.value='';renderAttChips();renderAttBar()}
