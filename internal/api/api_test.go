@@ -39,6 +39,7 @@ type testEnv struct {
 	srv   *httptest.Server
 	token string
 	store *store.SQLiteStore
+	api   *API
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -82,7 +83,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		a.Close()
 		st.Close()
 	})
-	return &testEnv{srv: srv, token: token, store: st}
+	return &testEnv{srv: srv, token: token, store: st, api: a}
 }
 
 // call 发起一次带 token 的请求，返回 HTTP 状态码与统一响应体。

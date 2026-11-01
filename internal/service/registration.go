@@ -141,11 +141,17 @@ func (s *OrderService) CreateRegistration(ctx context.Context, in RegistrationIn
 
 // regOperator 操作流水里记清楚这笔单是买家自己填的，以及是谁发的链接。
 func regOperator(issuer string) string {
-	if issuer == "" {
+	switch issuer {
+	case "":
 		return "buyer"
+	case SelfRegIssuer:
+		return "buyer via 自助入口"
 	}
 	return "buyer via " + issuer
 }
+
+// SelfRegIssuer 公开自助入口签的链接，签发人记成这个，不是哪个卖家的 openid。
+const SelfRegIssuer = "self"
 
 // resolveRegItems 把买家选的 spec_id + 只数翻译成明细快照，一档一行。
 // 单价、规格名、克数、性别、品相全部取自 specs 表当前值，买家传什么都不看。

@@ -81,6 +81,11 @@ button.go:disabled{opacity:.45}
 .foot{text-align:center;color:var(--muted);font-size:12px;margin-top:40px}
 .foot a{color:inherit;text-decoration:none}
 
+/* 公开入口 */
+.start{display:none}
+.start.on{display:block}
+.start .hint{margin:8px 0 16px}
+
 /* 回执 */
 .done{display:none}
 .done.on{display:block}
@@ -153,6 +158,15 @@ button.go:disabled{opacity:.45}
       <button class="go" type="button" id="go">提交登记</button>
       <div class="err" id="err"></div>
     </div>
+  </div>
+
+  <!-- 公开入口：不带链接打开 /r 时先留个联系方式，换一条登记链接再跳回来 -->
+  <div class="card start" id="start">
+    <label for="contact">你的微信号，或能加上微信的手机号</label>
+    <input id="contact" maxlength="32" autocomplete="tel" placeholder="微信号 / 手机号">
+    <div class="hint">卖家会照着加你微信，确认规格、运费和发货时间。</div>
+    <button class="go" type="button" id="startGo">下一步：填收货信息</button>
+    <div class="err" id="startErr"></div>
   </div>
 
   <div class="card done" id="done"></div>
@@ -438,13 +452,62 @@ button.go:disabled{opacity:.45}
 
   // ---------- 起手 ----------
 
+  // ---------- 公开入口：没带链接就先留联系方式 ----------
+
+  var CONTACT_KEY = 'crab:contact'
+
+  function store(key, val) {
+    try { if (val == null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, val) } catch (x) {}
+  }
+  function recall(key) {
+    try { return sessionStorage.getItem(key) || '' } catch (x) { return '' }
+  }
+
+  // 和后端 normalizeContact 同一套规则，这里只是提前拦一下，以后端为准
+  function phoneOf(raw) {
+    var s = String(raw || '').replace(/\s+/g, '').replace(/-/g, '').replace(/^\+86/, '')
+    return /^1[3-9]\d{9}$/.test(s) ? s : ''
+  }
+
+  function startSubmit() {
+    var raw = $('contact').value.trim()
+    var s = raw.replace(/\s+/g, '')
+    var errBox = $('startErr'), btn = $('startGo')
+    if (!s) { errBox.textContent = '留个微信号或手机号，方便加你确认'; return }
+    if (!phoneOf(s) && !/^[A-Za-z][A-Za-z0-9_-]{5,19}$/.test(s)) {
+      errBox.textContent = '看着不对：手机号 11 位，微信号字母开头 6–20 位'
+      return
+    }
+    errBox.textContent = ''
+    btn.disabled = true
+    btn.textContent = '稍等'
+    request('POST', '/api/public/reg-links', { contact: raw }, function (e, body) {
+      btn.disabled = false
+      btn.textContent = '下一步：填收货信息'
+      if (e || !body) { errBox.textContent = '网络不太好，再试一次'; return }
+      if (body.code !== 0 || !body.data || !body.data.token) {
+        errBox.textContent = body.msg || '没成功，等会儿再试'
+        return
+      }
+      // 留的是手机号的话，下一页的手机号先帮着填上
+      store(CONTACT_KEY, phoneOf(s) || null)
+      // replace：返回键不回到这一步，免得又签一条
+      location.replace('/r?t=' + encodeURIComponent(body.data.token))
+    })
+  }
+
   if (!token) {
     formEl.className = 'form off'
-    doneEl.innerHTML = '<div class="dead">这条链接不完整，<br>重新要一条吧</div>'
-    doneEl.className = 'card done on'
-    $('sub').textContent = '链接有点问题'
+    $('start').className = 'card start on'
+    $('sub').textContent = '先留个联系方式'
+    $('startGo').addEventListener('click', startSubmit)
+    $('contact').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') startSubmit() })
+    $('contact').addEventListener('input', function () { $('startErr').textContent = '' })
     return
   }
+
+  var rememberedPhone = recall(CONTACT_KEY)
+  if (rememberedPhone && !$('phone').value) $('phone').value = rememberedPhone
 
   // 希望发货日期不能往回填，后端也会拦
   $('date').min = todayStr()
