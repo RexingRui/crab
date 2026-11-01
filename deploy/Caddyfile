@@ -44,15 +44,6 @@
 		}
 	}
 
-	# 卖家订单表：页面本身不含数据，读写都要管理员 token；和接口同源，不需要放行跨域。
-	handle /admin* {
-		header X-Robots-Tag noindex
-		rewrite * /index.html
-		file_server {
-			root /srv/admin
-		}
-	}
-
 	# 班级积分管理：单个静态 HTML，不调接口，数据只存在老师自己浏览器的 localStorage 里。
 	handle /points* {
 		header X-Robots-Tag noindex
