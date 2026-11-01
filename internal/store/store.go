@@ -85,11 +85,13 @@ type FreightSummary struct {
 }
 
 // RangeSummary 区间统计结果。
+// 已取消的单不计入，只单独数一下有几单。
 type RangeSummary struct {
-	OrderCount   int
-	PayableTotal int64
-	PaidTotal    int64
-	CrabCount    int
+	OrderCount     int
+	PayableTotal   int64
+	PaidTotal      int64
+	CrabCount      int
+	CancelledCount int
 }
 
 // Store 在 Queries 之上增加事务与生命周期管理。

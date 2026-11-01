@@ -12,28 +12,44 @@ const METHODS = [
   { key: 'other', label: '其他' }
 ]
 
-/** 记一笔收款。金额默认带入还差的部分，支持填负数做退款。 */
+/** 记一笔收款或退款。
+ *
+ * 数字键盘（type='digit'）没有负号，没法直接填负数，所以退款单独做成一个选项：
+ * 金额永远填正数，选「退回」时提交成负数。后端的口径不变（负数就是退款）。 */
 export default function PaymentSheet({ visible, order, submitting, onClose, onSubmit }) {
+  const [refund, setRefund] = useState(false)
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState('wechat')
   const [remark, setRemark] = useState('')
+  const [prefill, setPrefill] = useState('')
 
   useEffect(() => {
     if (!visible) return
-    // 默认带入还差的部分；已经收清或多收了就留空，让人自己填
-    const rest = order ? Math.max(0, order.unpaid_amount || 0) : 0
-    setAmount(rest ? fenToYuan(rest, { symbol: false, alwaysCents: true }) : '')
+    // 还差钱就默认收这么多；多收了就默认退多出来的部分；正好收清就留空
+    const rest = order ? order.unpaid_amount || 0 : 0
+    const text = rest ? fenToYuan(Math.abs(rest), { symbol: false, alwaysCents: true }) : ''
+    setRefund(rest < 0)
+    setAmount(text)
+    setPrefill(text)
     setMethod('wechat')
     setRemark('')
   }, [visible, order])
 
-  const fen = yuanToFen(amount)
+  // 带出来的默认金额只对默认方向有意义（还差的钱不是该退的钱），换方向就清掉；自己填的不动
+  function pickDirection(next) {
+    if (next === refund) return
+    setRefund(next)
+    if (amount === prefill) setAmount('')
+  }
+
+  // 粘贴进来的「-50」也按 50 算，正负只看上面选的是收还是退
+  const fen = Math.abs(yuanToFen(amount)) * (refund ? -1 : 1)
   const ready = fen !== 0
 
   return (
     <Sheet
       visible={visible}
-      title='记一笔收款'
+      title={refund ? '记一笔退款' : '记一笔收款'}
       onClose={onClose}
       footer={
         <View
@@ -44,7 +60,24 @@ export default function PaymentSheet({ visible, order, submitting, onClose, onSu
         </View>
       }
     >
-      <Text className='sub'>金额（填负数就是退回去的钱；记错了也是再记一笔负数冲掉）</Text>
+      <View className='payment-sheet__chips payment-sheet__dir'>
+        <Text
+          className={`payment-sheet__chip ${refund ? '' : 'payment-sheet__chip--on'}`}
+          onClick={() => pickDirection(false)}
+        >
+          收到
+        </Text>
+        <Text
+          className={`payment-sheet__chip ${refund ? 'payment-sheet__chip--on' : ''}`}
+          onClick={() => pickDirection(true)}
+        >
+          退回
+        </Text>
+      </View>
+
+      <Text className='sub payment-sheet__gap'>
+        {refund ? '退回去多少（记错了的收款也用这个冲掉）' : '收到多少'}
+      </Text>
       <Input
         cursorSpacing={CURSOR_SPACING}
         className='payment-sheet__amount num'

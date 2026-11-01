@@ -227,12 +227,16 @@ func (q *queries) UnpaidSummary(ctx context.Context) (int, int64, error) {
 }
 
 // RangeSummary 按创建时间口径统计区间内的订单数、应收、实收与蟹只数。
+// 已取消的单不算进这几个数（没卖出去），只单独数一下有几单。
 func (q *queries) RangeSummary(ctx context.Context, start, end int64) (RangeSummary, error) {
 	var r RangeSummary
 	err := q.db.QueryRowContext(ctx,
-		`SELECT COUNT(*), COALESCE(SUM(payable_amount),0), COALESCE(SUM(paid_amount),0)
+		`SELECT COALESCE(SUM(ship_status != 'cancelled'),0),
+		        COALESCE(SUM(CASE WHEN ship_status != 'cancelled' THEN payable_amount END),0),
+		        COALESCE(SUM(CASE WHEN ship_status != 'cancelled' THEN paid_amount END),0),
+		        COALESCE(SUM(ship_status = 'cancelled'),0)
 		 FROM orders WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= ?`,
-		start, end).Scan(&r.OrderCount, &r.PayableTotal, &r.PaidTotal)
+		start, end).Scan(&r.OrderCount, &r.PayableTotal, &r.PaidTotal, &r.CancelledCount)
 	if err != nil {
 		return r, fmt.Errorf("range summary: %w", err)
 	}
@@ -240,7 +244,8 @@ func (q *queries) RangeSummary(ctx context.Context, start, end int64) (RangeSumm
 	err = q.db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(i.quantity),0) FROM order_items i
 		 JOIN orders o ON o.id = i.order_id
-		 WHERE o.deleted_at IS NULL AND o.created_at >= ? AND o.created_at <= ?`,
+		 WHERE o.deleted_at IS NULL AND o.ship_status != 'cancelled'
+		   AND o.created_at >= ? AND o.created_at <= ?`,
 		start, end).Scan(&r.CrabCount)
 	if err != nil {
 		return r, fmt.Errorf("range crab count: %w", err)
@@ -248,7 +253,7 @@ func (q *queries) RangeSummary(ctx context.Context, start, end int64) (RangeSumm
 	return r, nil
 }
 
-// SpecStatsBetween 按规格聚合区间内的销量（只数）与金额。
+// SpecStatsBetween 按规格聚合区间内的销量（只数）与金额，不含已取消的单。
 //
 // 按「性别 + 克重 + 品相」分组，不按 spec_label：档名可能改过，按名字分组同一档会被
 // 拆成好几行。名称优先用价目表里的现名，价目表里没有了就取快照里的一个，
@@ -261,7 +266,8 @@ func (q *queries) SpecStatsBetween(ctx context.Context, start, end int64) ([]mod
 		                  ORDER BY s.enabled DESC, s.id DESC LIMIT 1), MIN(i.spec_label)),
 		        SUM(i.quantity), SUM(i.amount)
 		 FROM order_items i JOIN orders o ON o.id = i.order_id
-		 WHERE o.deleted_at IS NULL AND o.created_at >= ? AND o.created_at <= ?
+		 WHERE o.deleted_at IS NULL AND o.ship_status != 'cancelled'
+		   AND o.created_at >= ? AND o.created_at <= ?
 		 GROUP BY i.gender, i.spec_gram, i.grade
 		 ORDER BY SUM(i.amount) DESC`, start, end)
 	if err != nil {

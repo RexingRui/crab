@@ -92,11 +92,36 @@ function listOrders(params = {}) {
   }
 }
 
+/* 按规格聚合，口径同后端 SpecStatsBetween：性别 + 克重 + 品相 */
+function bySpec(orders) {
+  const map = {}
+  orders.forEach((o) => (o.items || []).forEach((i) => {
+    const key = `${i.gender}-${i.spec_gram}-${i.grade || 'normal'}`
+    const row = map[key] || (map[key] = {
+      gender: i.gender, spec_gram: i.spec_gram, grade: i.grade || 'normal',
+      spec_label: i.spec_label, quantity: 0, amount: 0
+    })
+    row.quantity += i.quantity
+    row.amount += i.amount || 0
+  }))
+  return Object.values(map).sort((a, b) => b.amount - a.amount)
+}
+
 /* 与后端 /api/stats/dashboard 同构 */
-function dashboard() {
+function dashboard(params = {}) {
   const { orders } = dataset()
   const today = todayStr()
+  const start = params.start || today
+  const end = params.end || today
+  const inRange = (v) => {
+    const day = String(v || '').slice(0, 10)
+    return day >= start && day <= end
+  }
   const live = orders.filter((o) => o.ship_status !== 'cancelled')
+  const ranged = live.filter((o) => inRange(o.created_at))
+  const received = orders.reduce((sum, o) => sum + (o.payments || [])
+    .filter((p) => inRange(p.paid_at))
+    .reduce((s, p) => s + p.amount, 0), 0)
   const unpaid = live.filter((o) => o.unpaid_amount > 0)
   const createdToday = live.filter((o) => String(o.created_at || '').slice(0, 10) === today)
 
@@ -114,13 +139,20 @@ function dashboard() {
       unpaid_amount: unpaid.reduce((sum, o) => sum + o.unpaid_amount, 0)
     },
     range: {
-      start: today,
-      end: today,
-      order_count: live.length,
-      payable_total: live.reduce((sum, o) => sum + o.payable_amount, 0),
-      paid_total: live.reduce((sum, o) => sum + o.paid_amount, 0),
-      crab_count: live.reduce((sum, o) => sum + o.items.reduce((n, i) => n + i.quantity, 0), 0),
-      by_spec: []
+      start,
+      end,
+      order_count: ranged.length,
+      payable_total: ranged.reduce((sum, o) => sum + o.payable_amount, 0),
+      paid_total: ranged.reduce((sum, o) => sum + o.paid_amount, 0),
+      crab_count: ranged.reduce((sum, o) => sum + o.items.reduce((n, i) => n + i.quantity, 0), 0),
+      by_spec: bySpec(ranged),
+      received_total: received,
+      cancelled_count: orders.filter((o) => o.ship_status === 'cancelled' && inRange(o.created_at)).length
+    },
+    // 演示数据不带运费明细，运费一律为空
+    freight: {
+      range_count: 0, list_total: 0, cost_total: 0, buyer_total: 0, seller_total: 0, saved_total: 0,
+      unsettled_count: 0, unsettled_cost: 0, unsettled_list: 0, shipped_pending_count: 0
     }
   }
 }
@@ -141,7 +173,7 @@ function specs(params = {}) {
 }
 
 const READ_ROUTES = [
-  [/^\/api\/stats\/dashboard/, () => dashboard()],
+  [/^\/api\/stats\/dashboard/, (m, o) => dashboard(o.data)],
   [/^\/api\/stats\/ship-plan/, (m, o) => shipPlan(o.data)],
   [/^\/api\/specs$/, (m, o) => specs(o.data)],
   [/^\/api\/addresses$/, () => ({ list: [], total: 0 })],

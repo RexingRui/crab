@@ -308,7 +308,7 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/stats/dashboard?start
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/stats/ship-plan?date=2026-09-16'
 ```
 
-口径：`today.revenue` 是当天**实际收到的钱**（按收款流水的收款时间计，含退款负数）；`range.crab_count` 是明细只数之和，`range.by_spec` 按「性别 + 克重 + 品相」分组；`freight.*` 是运费汇总（实付、买家承担、卖家承担、用券省下的、未结），区间同样按订单创建时间；`range.*` 按订单**创建时间**落在区间内统计；`pending.unpaid_amount` 不含已取消的订单。`ship-plan` 的 `date` 默认明天。
+口径：`today.revenue` 是当天**实际收到的钱**（按收款流水的收款时间计，含退款负数）；`range.crab_count` 是明细只数之和，`range.by_spec` 按「性别 + 克重 + 品相」分组；`freight.*` 是运费汇总（实付、买家承担、卖家承担、用券省下的、未结），区间同样按订单创建时间；`range.*` 按订单**创建时间**落在区间内统计，**不含已取消的单**（`range.cancelled_count` 单独给）；`range.received_total` 是区间内实际收到的钱，口径同 `today.revenue`；`pending.unpaid_amount` 不含已取消的订单。`ship-plan` 的 `date` 默认明天。
 
 **地址簿 / 价目表**
 
@@ -443,7 +443,8 @@ TARO_APP_API_BASE_URL=https://your.domain TARO_APP_TRACK_URL=https://your.domain
 不传就用 `src/utils/config.js` 里的正式域名（改域名改那一处即可）；也可以在小程序「设置」页
 临时改，存本地。域名记得在小程序后台配成 request 合法域名。上传体验版见下面的「小程序上传」。
 
-页面：今天（要发的清单 + 汇总）、记一笔（录单）、全部（列表筛选）、详情、设置。
+页面：今天（要发的清单 + 汇总）、记一笔（录单）、全部（列表筛选）、统计（全部 / 本月 / 近 7 天 / 今天的单数、只数、应收、实收、运费、按规格）、详情、设置。
+「记一笔收款」分「收到 / 退回」两个选项：数字键盘没有负号，退款不能靠填负数。
 「记一笔」顶上还有一条「让买家自己填 · 发条登记链接」：生成登记链接并复制成一段话，
 粘到微信发给买家。入口放在录单页而不是首页——它和录单是替代关系，摆一起才看得出是二选一。
 
