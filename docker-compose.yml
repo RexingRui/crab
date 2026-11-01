@@ -71,7 +71,6 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./web/track:/srv/track:ro         # 买家查单页，静态文件
       - ./web/register:/srv/register:ro   # 买家自助登记页，静态文件
-      - ./web/admin:/srv/admin:ro         # 卖家订单表，静态文件（凭 token 才能读写数据）
       - ./web/points:/srv/points:ro       # 班级积分管理，静态文件（数据在老师浏览器里，不经后端）
       - ./web/home:/srv/home:ro           # 域名首页，只有名字和备案号
       - /opt/caddy-sites:/etc/caddy/sites:ro   # 同机其它项目的路由片段（见 deploy/Caddyfile 的 import）

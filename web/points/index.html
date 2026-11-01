@@ -419,7 +419,7 @@ function fresh(){
 var LS=null;
 try{LS=window.localStorage;LS.setItem('__t','1');LS.removeItem('__t')}catch(e){LS=null}
 /* 备份文件可能被人改过。读进来时把每个字段收成该有的类型、id 只许字母数字，
-   渲染时数字和 id 才能直接拼进 HTML（页面和 /admin 同源，脚本注入能读到它的 token）。 */
+   渲染时数字和 id 才能直接拼进 HTML（页面和其它页面同源，脚本注入能读写它们的本地数据）。 */
 var ID_RE=/^[\w-]{1,64}$/,DATE_RE=/^\d{4}-\d{2}-\d{2}$/;
 function toStr(v){return v==null?'':String(v)}
 function toInt(v){v=Math.round(Number(v));return isFinite(v)?v:0}
